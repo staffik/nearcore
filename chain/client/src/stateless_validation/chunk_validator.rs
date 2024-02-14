@@ -703,4 +703,21 @@ impl Client {
         self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, chunk_producer);
         Ok(())
     }
+
+    pub fn process_ready_orphan_chunk_state_witnesses(&mut self, accepted_block: &Block) {
+        let ready_witnesses = self
+            .chunk_validator
+            .orphan_witness_pool
+            .take_state_witnesses_waiting_for_block(accepted_block.hash());
+        for witness in ready_witnesses {
+            if let Err(err) = self.process_chunk_state_witness_with_prev_block(
+                witness,
+                PeerId::random(), // TODO: Should peer_id even be here? https://github.com/near/stakewars-iv/issues/17
+                accepted_block,
+                None,
+            ) {
+                tracing::error!(target: "client", ?err, "Error processing orphan chunk state witness");
+            }
+        }
+    }
 }
