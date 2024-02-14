@@ -333,7 +333,7 @@ impl EpochManager {
         self.save_epoch_start(
             &mut store_update,
             epoch_id,
-            source_epoch_manager.get_epoch_start_from_epoch_id(epoch_id)?,
+            source_epoch_manager.get_epoch_start_height_from_epoch_id(epoch_id)?,
         )?;
 
         store_update.commit()?;
@@ -1293,7 +1293,7 @@ impl EpochManager {
         };
         let cur_epoch_info = self.get_epoch_info(&epoch_id)?;
         let epoch_height = cur_epoch_info.epoch_height();
-        let epoch_start_height = self.get_epoch_start_from_epoch_id(&epoch_id)?;
+        let epoch_start_height = self.get_epoch_start_height_from_epoch_id(&epoch_id)?;
         let mut validator_to_shard = (0..cur_epoch_info.validators_len())
             .map(|_| HashSet::default())
             .collect::<Vec<HashSet<ShardId>>>();
@@ -1501,8 +1501,8 @@ impl EpochManager {
             return Ok(Ordering::Equal);
         }
         match (
-            self.get_epoch_start_from_epoch_id(epoch_id),
-            self.get_epoch_start_from_epoch_id(other_epoch_id),
+            self.get_epoch_start_height_from_epoch_id(epoch_id),
+            self.get_epoch_start_height_from_epoch_id(other_epoch_id),
         ) {
             (Ok(index1), Ok(index2)) => Ok(index1.cmp(&index2)),
             (Ok(_), Err(_)) => self.get_epoch_info(other_epoch_id).map(|_| Ordering::Less),
@@ -1725,7 +1725,10 @@ impl EpochManager {
         Ok(())
     }
 
-    fn get_epoch_start_from_epoch_id(&self, epoch_id: &EpochId) -> Result<BlockHeight, EpochError> {
+    fn get_epoch_start_height_from_epoch_id(
+        &self,
+        epoch_id: &EpochId,
+    ) -> Result<BlockHeight, EpochError> {
         self.epoch_id_to_start.get_or_try_put(epoch_id.clone(), |epoch_id| {
             self.store
                 .get_ser(DBCol::EpochStart, epoch_id.as_ref())?
