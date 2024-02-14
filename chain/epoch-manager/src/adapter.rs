@@ -4,6 +4,7 @@ use crate::EpochInfoAggregator;
 use crate::EpochManagerHandle;
 use near_chain_primitives::Error;
 use near_crypto::Signature;
+use near_primitives::block::Tip;
 use near_primitives::block_header::{Approval, ApprovalInner, BlockHeader};
 use near_primitives::epoch_manager::block_info::BlockInfo;
 use near_primitives::epoch_manager::epoch_info::EpochInfo;
@@ -433,6 +434,30 @@ pub trait EpochManagerAdapter: Send + Sync {
         let epoch_config = self.get_epoch_config(epoch_id)?;
         let epoch_end_height = epoch_start_height.saturating_add(epoch_config.epoch_length);
         Ok(height <= epoch_end_height)
+    }
+
+    /// Determines whether the given block height belongs to one of the epochs around the chain tip.
+    /// It checks only the previous, current and next epoch relative to the tip.
+    /// If the height belongs to one of those epochs, it will return the EpochId of this epoch.
+    /// Otherwise returns None, or Error if some epoch doesn't exist.
+    fn epoch_id_from_height_around_tip(
+        &self,
+        height: BlockHeight,
+        tip: &Tip,
+    ) -> Result<Option<EpochId>, EpochError> {
+        if self.is_height_inside_epoch(height, &tip.epoch_id)? {
+            return Ok(Some(tip.epoch_id.clone()));
+        }
+        if self.is_height_inside_epoch(height, &tip.next_epoch_id)? {
+            return Ok(Some(tip.next_epoch_id.clone()));
+        }
+
+        let prev_epoch = self.get_prev_epoch_id_from_prev_block(&tip.prev_block_hash)?;
+        if self.is_height_inside_epoch(height, &prev_epoch)? {
+            return Ok(Some(prev_epoch));
+        }
+
+        Ok(None)
     }
 
     /// Returns a vector of all hashes in the epoch ending with `last_block_info`.
