@@ -421,6 +421,20 @@ pub trait EpochManagerAdapter: Send + Sync {
 
     fn will_shard_layout_change(&self, parent_hash: &CryptoHash) -> Result<bool, EpochError>;
 
+    fn is_height_inside_epoch(
+        &self,
+        height: BlockHeight,
+        epoch_id: &EpochId,
+    ) -> Result<bool, EpochError> {
+        let epoch_start_height = self.get_epoch_start_height_from_epoch_id(epoch_id)?;
+        if height < epoch_start_height {
+            return Ok(false);
+        }
+        let epoch_config = self.get_epoch_config(epoch_id)?;
+        let epoch_end_height = epoch_start_height.saturating_add(epoch_config.epoch_length);
+        Ok(height <= epoch_end_height)
+    }
+
     /// Returns a vector of all hashes in the epoch ending with `last_block_info`.
     /// Only return blocks on chain of `last_block_info`.
     /// Hashes are returned in the order from the last block to the first block.
