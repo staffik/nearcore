@@ -141,6 +141,12 @@ pub trait EpochManagerAdapter: Send + Sync {
     /// Get epoch start from a block belonging to the epoch.
     fn get_epoch_start_height(&self, block_hash: &CryptoHash) -> Result<BlockHeight, EpochError>;
 
+    /// Get epoch start height of the given Epoch
+    fn get_epoch_start_height_from_epoch_id(
+        &self,
+        epoch_id: &EpochId,
+    ) -> Result<BlockHeight, EpochError>;
+
     /// Get previous epoch id by hash of previous block.
     fn get_prev_epoch_id_from_prev_block(
         &self,
@@ -599,6 +605,14 @@ impl EpochManagerAdapter for EpochManagerHandle {
     fn get_epoch_start_height(&self, block_hash: &CryptoHash) -> Result<BlockHeight, EpochError> {
         let epoch_manager = self.read();
         epoch_manager.get_epoch_start_height(block_hash)
+    }
+
+    fn get_epoch_start_height_from_epoch_id(
+        &self,
+        epoch_id: &EpochId,
+    ) -> Result<BlockHeight, EpochError> {
+        let epoch_manager = self.read();
+        epoch_manager.get_epoch_start_height_from_epoch_id(epoch_id)
     }
 
     fn get_prev_epoch_id_from_prev_block(

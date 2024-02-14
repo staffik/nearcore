@@ -1725,7 +1725,7 @@ impl EpochManager {
         Ok(())
     }
 
-    fn get_epoch_start_height_from_epoch_id(
+    pub fn get_epoch_start_height_from_epoch_id(
         &self,
         epoch_id: &EpochId,
     ) -> Result<BlockHeight, EpochError> {
