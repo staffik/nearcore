@@ -597,7 +597,14 @@ impl Client {
         // Context: We are currently unable to handle production of the state witness for the
         // first chunk after genesis as it's not possible to run the genesis chunk in runtime.
         let prev_block_hash = witness.inner.chunk_header.prev_block_hash();
-        let prev_block = self.chain.get_block(prev_block_hash)?;
+        let prev_block = match self.chain.get_block(prev_block_hash) {
+            Ok(block) => block,
+            Err(Error::DBNotFoundErr(_)) => {
+                // Previous block isn't available at the moment, add this witness to the orphan pool.
+                return self.handle_orphan_state_witness(witness);
+            }
+            Err(err) => return Err(err),
+        };
         self.process_chunk_state_witness_with_prev_block(
             witness,
             peer_id,
@@ -656,5 +663,44 @@ impl Client {
             ));
         }
         result
+    }
+
+    pub fn handle_orphan_state_witness(&mut self, witness: ChunkStateWitness) -> Result<(), Error> {
+        let chunk_header = &witness.inner.chunk_header;
+        let epoch_id = self
+            .epoch_manager
+            .epoch_id_from_height_around_tip(chunk_header.height_created(), &self.chain.head()?)?
+            .ok_or_else(|| {
+                Error::Other(format!(
+                    "Couldn't find EpochId for orphan chunk state witness with height {}",
+                    chunk_header.height_created()
+                ))
+            })?;
+
+        if !self
+            .epoch_manager
+            .get_shard_layout(&epoch_id)?
+            .shard_ids()
+            .contains(&chunk_header.shard_id())
+        {
+            return Err(Error::InvalidChunkStateWitness(format!(
+                "Invalid shard_id in ChunkStateWitness: {}",
+                chunk_header.shard_id()
+            )));
+        }
+
+        if !self.epoch_manager.verify_chunk_state_witness_signature_in_epoch(&witness, &epoch_id)? {
+            return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
+        }
+
+        // TODO: Check size of ChunkStateWitness
+
+        let chunk_producer = self.epoch_manager.get_chunk_producer(
+            &epoch_id,
+            chunk_header.height_created(),
+            chunk_header.shard_id(),
+        )?;
+        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, chunk_producer);
+        Ok(())
     }
 }
