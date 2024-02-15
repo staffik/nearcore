@@ -27,6 +27,7 @@ pub struct OrphanStateWitnessPool {
 }
 
 impl OrphanStateWitnessPool {
+    /// Create a new `OrphanStateWitnessPool` with a capacity of `cache_capacity` witnesses.
     /// The `Default` trait implementation provides reasonable defaults.
     pub fn new(cache_capacity: usize) -> Self {
         OrphanStateWitnessPool {
