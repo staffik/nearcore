@@ -1,4 +1,4 @@
-use super::orphan_witness_pool::OrphanStateWitnessPool;
+use super::orphan_witness_pool::{OrphanStateWitnessPool, MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD};
 use super::processing_tracker::ProcessingDoneTracker;
 use crate::stateless_validation::chunk_endorsement_tracker::ChunkEndorsementTracker;
 use crate::{metrics, Client};
@@ -667,9 +667,18 @@ impl Client {
 
     pub fn handle_orphan_state_witness(&mut self, witness: ChunkStateWitness) -> Result<(), Error> {
         let chunk_header = &witness.inner.chunk_header;
+        let chain_head = &self.chain.head()?;
+
+        if chain_head.height.abs_diff(chunk_header.height_created())
+            > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD
+        {
+            // Don't save orphaned state witnesses which are far away from the current chain head.
+            return Ok(());
+        }
+
         let epoch_id = self
             .epoch_manager
-            .epoch_id_from_height_around_tip(chunk_header.height_created(), &self.chain.head()?)?
+            .epoch_id_from_height_around_tip(chunk_header.height_created(), &chain_head)?
             .ok_or_else(|| {
                 Error::Other(format!(
                     "Couldn't find EpochId for orphan chunk state witness with height {}",
@@ -694,13 +703,7 @@ impl Client {
         }
 
         // TODO: Check size of ChunkStateWitness
-
-        let chunk_producer = self.epoch_manager.get_chunk_producer(
-            &epoch_id,
-            chunk_header.height_created(),
-            chunk_header.shard_id(),
-        )?;
-        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, chunk_producer);
+        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness);
         Ok(())
     }
 
