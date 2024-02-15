@@ -669,40 +669,47 @@ impl Client {
 
     pub fn handle_orphan_state_witness(&mut self, witness: ChunkStateWitness) -> Result<(), Error> {
         let chunk_header = &witness.inner.chunk_header;
-        let chain_head = &self.chain.head()?;
+        let witness_height = chunk_header.height_created();
+        let witness_shard = chunk_header.shard_id();
 
-        if chain_head.height.abs_diff(chunk_header.height_created())
-            > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD
-        {
+        let chain_head = &self.chain.head()?;
+        if chain_head.height.abs_diff(witness_height) > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD {
             // Don't save orphaned state witnesses which are far away from the current chain head.
+            tracing::debug!(
+                target: "client",
+                head_height = chain_head.height,
+                witness_height,
+                witness_shard,
+                "Not saving an orphaned ChunkStateWitness because it's far away from the chain head.");
             return Ok(());
         }
 
         let witness_size = borsh::to_vec(&witness)?.len();
         if witness_size > MAX_ORPHAN_WITNESS_SIZE {
             // Don't save orphaned state witnesses which are bigger than the allowed limit.
+            tracing::warn!(
+                target: "client",
+                witness_height,
+                witness_shard,
+                witness_size,
+                "Not saving an orphaned ChunkStateWitness because it's too big. This is unexpected.");
             return Ok(());
         }
 
         let epoch_id = self
             .epoch_manager
-            .epoch_id_from_height_around_tip(chunk_header.height_created(), &chain_head)?
+            .epoch_id_from_height_around_tip(witness_height, &chain_head)?
             .ok_or_else(|| {
                 Error::Other(format!(
                     "Couldn't find EpochId for orphan chunk state witness with height {}",
-                    chunk_header.height_created()
+                    witness_height
                 ))
             })?;
 
-        if !self
-            .epoch_manager
-            .get_shard_layout(&epoch_id)?
-            .shard_ids()
-            .contains(&chunk_header.shard_id())
-        {
+        if !self.epoch_manager.get_shard_layout(&epoch_id)?.shard_ids().contains(&witness_shard) {
             return Err(Error::InvalidChunkStateWitness(format!(
                 "Invalid shard_id in ChunkStateWitness: {}",
-                chunk_header.shard_id()
+                witness_shard
             )));
         }
 
@@ -710,6 +717,11 @@ impl Client {
             return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
         }
 
+        tracing::debug!(
+            target: "client",
+            witness_height,
+            witness_shard,
+            "Saving an orphaned ChunkStateWitness to orphan pool");
         self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness);
         Ok(())
     }
@@ -720,6 +732,12 @@ impl Client {
             .orphan_witness_pool
             .take_state_witnesses_waiting_for_block(accepted_block.hash());
         for witness in ready_witnesses {
+            tracing::debug!(
+                target: "client",
+                witness_height = witness.inner.chunk_header.height_created(),
+                witness_shard = witness.inner.chunk_header.shard_id(),
+                "Processing an orphaned ChunkStateWitness, its previous block has arrived."
+            );
             if let Err(err) = self.process_chunk_state_witness_with_prev_block(
                 witness,
                 PeerId::random(), // TODO: Should peer_id even be here? https://github.com/near/stakewars-iv/issues/17

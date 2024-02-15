@@ -53,6 +53,12 @@ impl OrphanStateWitnessPool {
         if let Some((_, ejected_witness)) = self.witness_cache.push(cache_key, witness) {
             // If another witness has been ejected from the cache due to capacity limit,
             // then remove the ejected witness from `waiting_for_block` to keep them in sync
+            tracing::debug!(
+                target: "client",
+                witness_height = ejected_witness.inner.chunk_header.height_created(),
+                witness_shard = ejected_witness.inner.chunk_header.shard_id(),
+                "Ejecting orphaned ChunkStateWitness from the cache due to capacity limit. It will not be processed."
+            );
             self.remove_from_waiting_for_block(&ejected_witness)
         }
 
