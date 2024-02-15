@@ -1,4 +1,6 @@
-use super::orphan_witness_pool::{OrphanStateWitnessPool, MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD};
+use super::orphan_witness_pool::{
+    OrphanStateWitnessPool, MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD, MAX_ORPHAN_WITNESS_SIZE,
+};
 use super::processing_tracker::ProcessingDoneTracker;
 use crate::stateless_validation::chunk_endorsement_tracker::ChunkEndorsementTracker;
 use crate::{metrics, Client};
@@ -676,6 +678,12 @@ impl Client {
             return Ok(());
         }
 
+        let witness_size = borsh::to_vec(&witness)?.len();
+        if witness_size > MAX_ORPHAN_WITNESS_SIZE {
+            // Don't save orphaned state witnesses which are bigger than the allowed limit.
+            return Ok(());
+        }
+
         let epoch_id = self
             .epoch_manager
             .epoch_id_from_height_around_tip(chunk_header.height_created(), &chain_head)?
@@ -702,7 +710,6 @@ impl Client {
             return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
         }
 
-        // TODO: Check size of ChunkStateWitness
         self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness);
         Ok(())
     }

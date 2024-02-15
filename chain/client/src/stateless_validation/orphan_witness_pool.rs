@@ -10,6 +10,10 @@ use near_primitives::types::{BlockHeight, ShardId};
 /// OrphanStateWitnessPool and protects against spam attacks.
 pub const MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD: BlockHeight = 5;
 
+/// We keep only orphan witnesses which are smaller than this size.
+/// This limits the maximum memory usage of OrphanStateWitnessPool.
+pub const MAX_ORPHAN_WITNESS_SIZE: usize = 16_000_000;
+
 /// `OrphanStateWitnessPool` is used to keep orphaned ChunkStateWitnesses until it's possible to process them.
 /// To process a ChunkStateWitness we need to have the previous block, but it might happen that a ChunkStateWitness
 /// shows up before the block is available. In such cases the witness is put in `OrphanStateWitnessPool` until the
