@@ -672,9 +672,9 @@ impl Client {
         let witness_height = chunk_header.height_created();
         let witness_shard = chunk_header.shard_id();
 
+        // Don't save orphaned state witnesses which are far away from the current chain head.
         let chain_head = &self.chain.head()?;
         if chain_head.height.abs_diff(witness_height) > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD {
-            // Don't save orphaned state witnesses which are far away from the current chain head.
             tracing::debug!(
                 target: "client",
                 head_height = chain_head.height,
@@ -684,9 +684,9 @@ impl Client {
             return Ok(());
         }
 
+        // Don't save orphaned state witnesses which are bigger than the allowed limit.
         let witness_size = borsh::to_vec(&witness)?.len();
         if witness_size > MAX_ORPHAN_WITNESS_SIZE {
-            // Don't save orphaned state witnesses which are bigger than the allowed limit.
             tracing::warn!(
                 target: "client",
                 witness_height,
@@ -696,6 +696,7 @@ impl Client {
             return Ok(());
         }
 
+        // Find EpochId based on height_created of the witness
         let epoch_id = self
             .epoch_manager
             .epoch_id_from_height_around_tip(witness_height, &chain_head)?
@@ -706,6 +707,7 @@ impl Client {
                 ))
             })?;
 
+        // Validate shard_id
         if !self.epoch_manager.get_shard_layout(&epoch_id)?.shard_ids().contains(&witness_shard) {
             return Err(Error::InvalidChunkStateWitness(format!(
                 "Invalid shard_id in ChunkStateWitness: {}",
@@ -726,10 +728,12 @@ impl Client {
             return Err(Error::NotAChunkValidator);
         }
 
+        // Verify signature
         if !self.epoch_manager.verify_chunk_state_witness_signature_in_epoch(&witness, &epoch_id)? {
             return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
         }
 
+        // Orphan witness is OK, save it to the pool
         tracing::debug!(
             target: "client",
             witness_height,
