@@ -740,7 +740,7 @@ impl Client {
             witness_height,
             witness_shard,
             "Saving an orphaned ChunkStateWitness to orphan pool");
-        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness);
+        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, witness_size);
         Ok(())
     }
 

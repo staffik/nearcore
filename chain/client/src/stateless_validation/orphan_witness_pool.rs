@@ -6,6 +6,8 @@ use near_primitives::hash::CryptoHash;
 use near_primitives::stateless_validation::ChunkStateWitness;
 use near_primitives::types::{BlockHeight, ShardId};
 
+use crate::metrics;
+
 /// We keep only orphan witnesses that are within this distance of
 /// the current chain head. This helps to reduce the size of
 /// OrphanStateWitnessPool and protects against spam attacks.
@@ -20,11 +22,16 @@ pub const MAX_ORPHAN_WITNESS_SIZE: usize = 16_000_000;
 /// shows up before the block is available. In such cases the witness is put in `OrphanStateWitnessPool` until the
 /// required block arrives and the witness can be processed.
 pub struct OrphanStateWitnessPool {
-    witness_cache: LruCache<(ShardId, BlockHeight), ChunkStateWitness>,
+    witness_cache: LruCache<(ShardId, BlockHeight), CacheEntry>,
     /// List of orphaned witnesses that wait for this block to appear.
     /// Maps block hash to entries in `witness_cache`.
     /// Must be kept in sync with `witness_cache`.
     waiting_for_block: HashMap<CryptoHash, HashSet<(ShardId, BlockHeight)>>,
+}
+
+struct CacheEntry {
+    pub witness: ChunkStateWitness,
+    pub witness_size: usize,
 }
 
 impl OrphanStateWitnessPool {
@@ -42,7 +49,8 @@ impl OrphanStateWitnessPool {
     /// It's expected that this `ChunkStateWitness` has gone through basic validation - including signature,
     /// shard_id, size and distance from the tip. The pool would still work without it, but without validation
     /// it'd be possible to fill the whole cache with spam.
-    pub fn add_orphan_state_witness(&mut self, witness: ChunkStateWitness) {
+    /// `witness_size` is only used for metrics, it's okay to pass 0 if you don't care about the metrics.
+    pub fn add_orphan_state_witness(&mut self, witness: ChunkStateWitness, witness_size: usize) {
         if self.witness_cache.cap() == 0 {
             // A cache with 0 capacity doesn't keep anything.
             return;
@@ -50,18 +58,21 @@ impl OrphanStateWitnessPool {
 
         // Insert the new ChunkStateWitness into the cache
         let chunk_header = &witness.inner.chunk_header;
-        let cache_key = (chunk_header.shard_id(), chunk_header.height_created());
         let prev_block_hash = *chunk_header.prev_block_hash();
-        if let Some((_, ejected_witness)) = self.witness_cache.push(cache_key, witness) {
+        let cache_key = (chunk_header.shard_id(), chunk_header.height_created());
+        let cache_entry = CacheEntry { witness, witness_size };
+        self.on_entry_added(&cache_entry);
+        if let Some((_, ejected_entry)) = self.witness_cache.push(cache_key, cache_entry) {
             // If another witness has been ejected from the cache due to capacity limit,
             // then remove the ejected witness from `waiting_for_block` to keep them in sync
             tracing::debug!(
                 target: "client",
-                witness_height = ejected_witness.inner.chunk_header.height_created(),
-                witness_shard = ejected_witness.inner.chunk_header.shard_id(),
+                witness_height = ejected_entry.witness.inner.chunk_header.height_created(),
+                witness_shard = ejected_entry.witness.inner.chunk_header.shard_id(),
                 "Ejecting orphaned ChunkStateWitness from the cache due to capacity limit. It will not be processed."
             );
-            self.remove_from_waiting_for_block(&ejected_witness)
+            self.remove_from_waiting_for_block(&ejected_entry.witness);
+            self.on_entry_removed(&ejected_entry);
         }
 
         // Add the new orphaned state witness to `waiting_for_block`
@@ -95,14 +106,45 @@ impl OrphanStateWitnessPool {
         let mut result = Vec::new();
         for (shard_id, height) in waiting {
             // Remove this witness from `witness_cache` to keep them in sync
-            let witness = self.witness_cache.pop(&(shard_id, height)).expect(
+            let entry = self.witness_cache.pop(&(shard_id, height)).expect(
                 "Every entry in waiting_for_block must have a corresponding witness in the cache",
             );
+            self.on_entry_removed(&entry);
 
-            result.push(witness);
+            result.push(entry.witness);
         }
         result
     }
+
+    fn on_entry_added(&self, entry: &CacheEntry) {
+        let shard_id_str = entry.witness.inner.chunk_header.shard_id().to_string();
+        metrics::ORPHAN_CHUNK_STATE_WITNESSES_TOTAL_COUNT
+            .with_label_values(&[shard_id_str.as_str()])
+            .inc();
+        metrics::ORPHAN_CHUNK_STATE_WITNESS_POOL_SIZE
+            .with_label_values(&[shard_id_str.as_str()])
+            .inc();
+        metrics::ORPHAN_CHUNK_STATE_WITNESS_POOL_MEMORY_USED
+            .with_label_values(&[shard_id_str.as_str()])
+            .add(witness_size_to_i64(entry.witness_size));
+    }
+
+    fn on_entry_removed(&self, entry: &CacheEntry) {
+        let shard_id_str = entry.witness.inner.chunk_header.shard_id().to_string();
+        metrics::ORPHAN_CHUNK_STATE_WITNESS_POOL_SIZE
+            .with_label_values(&[shard_id_str.as_str()])
+            .dec();
+        metrics::ORPHAN_CHUNK_STATE_WITNESS_POOL_MEMORY_USED
+            .with_label_values(&[shard_id_str.as_str()])
+            .sub(witness_size_to_i64(entry.witness_size));
+    }
+}
+
+fn witness_size_to_i64(witness_size: usize) -> i64 {
+    witness_size.try_into().expect(
+        "Orphaned ChunkStateWitness size can't be converted to i64. \
+    This should be impossible, is it over one exabyte in size?",
+    )
 }
 
 impl Default for OrphanStateWitnessPool {
