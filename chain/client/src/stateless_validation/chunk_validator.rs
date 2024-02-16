@@ -721,8 +721,8 @@ impl Client {
         };
         let chunk_validator_assignments = self.epoch_manager.get_chunk_validator_assignments(
             &epoch_id,
-            chunk_header.shard_id(),
-            chunk_header.height_created(),
+            witness_shard,
+            witness_height,
         )?;
         if !chunk_validator_assignments.contains(my_signer.validator_id()) {
             return Err(Error::NotAChunkValidator);
