@@ -713,6 +713,19 @@ impl Client {
             )));
         }
 
+        // Don't save orphan witnesses for chunks for which which we aren't a validator.
+        let Some(my_signer) = self.chunk_validator.my_signer.as_ref() else {
+            return Err(Error::NotAValidator);
+        };
+        let chunk_validator_assignments = self.epoch_manager.get_chunk_validator_assignments(
+            &epoch_id,
+            chunk_header.shard_id(),
+            chunk_header.height_created(),
+        )?;
+        if !chunk_validator_assignments.contains(my_signer.validator_id()) {
+            return Err(Error::NotAChunkValidator);
+        }
+
         if !self.epoch_manager.verify_chunk_state_witness_signature_in_epoch(&witness, &epoch_id)? {
             return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
         }
