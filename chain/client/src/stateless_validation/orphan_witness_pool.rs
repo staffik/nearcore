@@ -147,6 +147,15 @@ fn witness_size_to_i64(witness_size: usize) -> i64 {
     )
 }
 
+impl Drop for OrphanStateWitnessPool {
+    fn drop(&mut self) {
+        // Clear the metrics when an `OrphanStateWitnessPool` is dropped
+        for (_, entry) in self.witness_cache.iter() {
+            self.on_entry_removed(entry);
+        }
+    }
+}
+
 impl Default for OrphanStateWitnessPool {
     fn default() -> OrphanStateWitnessPool {
         OrphanStateWitnessPool::new(default_orphan_state_witness_pool_size())
