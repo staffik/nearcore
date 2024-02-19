@@ -681,6 +681,7 @@ impl Client {
                 head_height = chain_head.height,
                 witness_height,
                 witness_shard,
+                witness_chunk = ?chunk_header.chunk_hash(),
                 "Not saving an orphaned ChunkStateWitness because it's far away from the chain head.");
             return Ok(());
         }
@@ -693,6 +694,7 @@ impl Client {
                 witness_height,
                 witness_shard,
                 witness_size,
+                witness_chunk = ?chunk_header.chunk_hash(),
                 "Not saving an orphaned ChunkStateWitness because it's too big. This is unexpected.");
             return Ok(());
         }
@@ -739,6 +741,7 @@ impl Client {
             target: "client",
             witness_height,
             witness_shard,
+            witness_chunk = ?chunk_header.chunk_hash(),
             "Saving an orphaned ChunkStateWitness to orphan pool");
         self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, witness_size);
         Ok(())
@@ -750,10 +753,12 @@ impl Client {
             .orphan_witness_pool
             .take_state_witnesses_waiting_for_block(accepted_block.hash());
         for witness in ready_witnesses {
+            let chunk_header = &witness.inner.chunk_header;
             tracing::debug!(
                 target: "client",
-                witness_height = witness.inner.chunk_header.height_created(),
-                witness_shard = witness.inner.chunk_header.shard_id(),
+                witness_height = chunk_header.height_created(),
+                witness_shard = chunk_header.shard_id(),
+                witness_chunk = ?chunk_header.chunk_hash(),
                 "Processing an orphaned ChunkStateWitness, its previous block has arrived."
             );
             if let Err(err) = self.process_chunk_state_witness_with_prev_block(
