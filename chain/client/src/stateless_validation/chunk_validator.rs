@@ -604,7 +604,8 @@ impl Client {
             Ok(block) => block,
             Err(Error::DBNotFoundErr(_)) => {
                 // Previous block isn't available at the moment, add this witness to the orphan pool.
-                return self.handle_orphan_state_witness(witness);
+                self.handle_orphan_state_witness(witness)?;
+                return Ok(());
             }
             Err(err) => return Err(err),
         };
@@ -668,14 +669,18 @@ impl Client {
         result
     }
 
-    pub fn handle_orphan_state_witness(&mut self, witness: ChunkStateWitness) -> Result<(), Error> {
+    pub fn handle_orphan_state_witness(
+        &mut self,
+        witness: ChunkStateWitness,
+    ) -> Result<HandleOrphanWitnessOutcome, Error> {
         let chunk_header = &witness.inner.chunk_header;
         let witness_height = chunk_header.height_created();
         let witness_shard = chunk_header.shard_id();
 
         // Don't save orphaned state witnesses which are far away from the current chain head.
         let chain_head = &self.chain.head()?;
-        if chain_head.height.abs_diff(witness_height) > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD {
+        let head_distance = chain_head.height.abs_diff(witness_height);
+        if head_distance > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD {
             tracing::debug!(
                 target: "client",
                 head_height = chain_head.height,
@@ -683,7 +688,7 @@ impl Client {
                 witness_shard,
                 witness_chunk = ?chunk_header.chunk_hash(),
                 "Not saving an orphaned ChunkStateWitness because it's far away from the chain head.");
-            return Ok(());
+            return Ok(HandleOrphanWitnessOutcome::TooFarFromHead(head_distance));
         }
 
         // Don't save orphaned state witnesses which are bigger than the allowed limit.
@@ -696,7 +701,7 @@ impl Client {
                 witness_size,
                 witness_chunk = ?chunk_header.chunk_hash(),
                 "Not saving an orphaned ChunkStateWitness because it's too big. This is unexpected.");
-            return Ok(());
+            return Ok(HandleOrphanWitnessOutcome::TooBig(witness_size));
         }
 
         // Find EpochId based on height_created of the witness
@@ -744,7 +749,7 @@ impl Client {
             witness_chunk = ?chunk_header.chunk_hash(),
             "Saving an orphaned ChunkStateWitness to orphan pool");
         self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, witness_size);
-        Ok(())
+        Ok(HandleOrphanWitnessOutcome::SavedTooPool)
     }
 
     pub fn process_ready_orphan_chunk_state_witnesses(&mut self, accepted_block: &Block) {
@@ -771,4 +776,11 @@ impl Client {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleOrphanWitnessOutcome {
+    SavedTooPool,
+    TooBig(usize),
+    TooFarFromHead(u64),
 }
