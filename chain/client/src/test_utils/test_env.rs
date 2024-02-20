@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::adapter::ProcessTxResponse;
 use crate::stateless_validation::processing_tracker::{
@@ -28,8 +28,8 @@ use near_primitives::epoch_manager::RngSeed;
 use near_primitives::errors::InvalidTxError;
 use near_primitives::hash::CryptoHash;
 use near_primitives::network::PeerId;
-use near_primitives::sharding::PartialEncodedChunk;
-use near_primitives::stateless_validation::ChunkStateWitness;
+use near_primitives::sharding::{ChunkHash, PartialEncodedChunk};
+use near_primitives::stateless_validation::{ChunkEndorsement, ChunkStateWitness};
 use near_primitives::test_utils::create_test_signer;
 use near_primitives::transaction::{Action, FunctionCallAction, SignedTransaction};
 use near_primitives::types::{AccountId, Balance, BlockHeight, EpochId, NumSeats};
@@ -43,6 +43,8 @@ use once_cell::sync::OnceCell;
 use super::setup::setup_client_with_runtime;
 use super::test_env_builder::TestEnvBuilder;
 use super::TEST_SEED;
+
+const CHUNK_ENDORSEMENTS_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An environment for writing integration tests with multiple clients.
 /// This environment can simulate near nodes without network and it can be configured to use different runtimes.
@@ -68,6 +70,10 @@ pub struct StateWitnessPropagationOutput {
     /// roots.
     pub found_differing_post_state_root_due_to_state_transitions: bool,
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error("Timed out after {0:?}")]
+pub struct TimeoutError(Duration);
 
 impl TestEnv {
     pub fn default_builder() -> TestEnvBuilder {
@@ -379,6 +385,40 @@ impl TestEnv {
         self.propagate_chunk_endorsements(allow_errors);
     }
 
+    pub fn wait_for_chunk_endorsement(
+        &mut self,
+        client_idx: usize,
+        chunk_hash: &ChunkHash,
+    ) -> Result<ChunkEndorsement, TimeoutError> {
+        let start_time = Instant::now();
+        let network_adapter = self.network_adapters[client_idx].clone();
+        loop {
+            let mut endorsement_opt = None;
+            network_adapter.handle_filtered(|request| {
+                match &request {
+                    PeerManagerMessageRequest::NetworkRequests(
+                        NetworkRequests::ChunkEndorsement(_receiver_account_id, endorsement),
+                    ) if endorsement.chunk_hash() == chunk_hash => {
+                        endorsement_opt = Some(endorsement.clone());
+                    }
+                    _ => {}
+                };
+                Some(request)
+            });
+
+            if let Some(endorsement) = endorsement_opt {
+                return Ok(endorsement);
+            }
+
+            let elapsed_since_start = start_time.elapsed();
+            if elapsed_since_start > CHUNK_ENDORSEMENTS_TIMEOUT {
+                return Err(TimeoutError(elapsed_since_start));
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     pub fn send_money(&mut self, id: usize) -> ProcessTxResponse {
         let account_id = self.get_client_id(0);
         let signer =
@@ -532,6 +572,11 @@ impl TestEnv {
     /// specifically, returns validator id of the client’s validator signer.
     pub fn get_client_id(&self, idx: usize) -> &AccountId {
         self.clients[idx].validator_signer.as_ref().unwrap().validator_id()
+    }
+
+    /// Returns the index of client with the given [`AccoountId`].
+    pub fn get_client_index(&self, account_id: &AccountId) -> usize {
+        self.account_indices.index(account_id)
     }
 
     pub fn get_runtime_config(&self, idx: usize, epoch_id: EpochId) -> RuntimeConfig {

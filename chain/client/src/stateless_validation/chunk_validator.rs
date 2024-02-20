@@ -1,3 +1,6 @@
+use super::orphan_witness_pool::{
+    OrphanStateWitnessPool, MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD, MAX_ORPHAN_WITNESS_SIZE,
+};
 use super::processing_tracker::ProcessingDoneTracker;
 use crate::stateless_validation::chunk_endorsement_tracker::ChunkEndorsementTracker;
 use crate::{metrics, Client};
@@ -53,6 +56,7 @@ pub struct ChunkValidator {
     network_sender: Sender<PeerManagerMessageRequest>,
     runtime_adapter: Arc<dyn RuntimeAdapter>,
     chunk_endorsement_tracker: Arc<ChunkEndorsementTracker>,
+    orphan_witness_pool: OrphanStateWitnessPool,
 }
 
 impl ChunkValidator {
@@ -62,6 +66,7 @@ impl ChunkValidator {
         network_sender: Sender<PeerManagerMessageRequest>,
         runtime_adapter: Arc<dyn RuntimeAdapter>,
         chunk_endorsement_tracker: Arc<ChunkEndorsementTracker>,
+        orphan_witness_pool_size: usize,
     ) -> Self {
         Self {
             my_signer,
@@ -69,6 +74,7 @@ impl ChunkValidator {
             network_sender,
             runtime_adapter,
             chunk_endorsement_tracker,
+            orphan_witness_pool: OrphanStateWitnessPool::new(orphan_witness_pool_size),
         }
     }
 
@@ -588,7 +594,7 @@ impl Client {
         witness: ChunkStateWitness,
         peer_id: PeerId,
         processing_done_tracker: Option<ProcessingDoneTracker>,
-    ) -> Result<Option<ChunkStateWitness>, Error> {
+    ) -> Result<(), Error> {
         // TODO(#10502): Handle production of state witness for first chunk after genesis.
         // Properly handle case for chunk right after genesis.
         // Context: We are currently unable to handle production of the state witness for the
@@ -596,10 +602,35 @@ impl Client {
         let prev_block_hash = witness.inner.chunk_header.prev_block_hash();
         let prev_block = match self.chain.get_block(prev_block_hash) {
             Ok(block) => block,
-            Err(_) => {
-                return Ok(Some(witness));
+            Err(Error::DBNotFoundErr(_)) => {
+                // Previous block isn't available at the moment, add this witness to the orphan pool.
+                self.handle_orphan_state_witness(witness)?;
+                return Ok(());
             }
+            Err(err) => return Err(err),
         };
+        self.process_chunk_state_witness_with_prev_block(
+            witness,
+            peer_id,
+            &prev_block,
+            processing_done_tracker,
+        )
+    }
+
+    pub fn process_chunk_state_witness_with_prev_block(
+        &mut self,
+        witness: ChunkStateWitness,
+        peer_id: PeerId,
+        prev_block: &Block,
+        processing_done_tracker: Option<ProcessingDoneTracker>,
+    ) -> Result<(), Error> {
+        if witness.inner.chunk_header.prev_block_hash() != prev_block.hash() {
+            return Err(Error::Other(
+                "process_chunk_state_witness_with_prev_block - prev_block doesn't match"
+                    .to_string(),
+            ));
+        }
+
         let prev_chunk_header = Chain::get_prev_chunk_header(
             self.epoch_manager.as_ref(),
             &prev_block,
@@ -616,7 +647,7 @@ impl Client {
                 &self.chunk_validator.network_sender,
                 self.chunk_endorsement_tracker.as_ref(),
             );
-            return Ok(None);
+            return Ok(());
         }
 
         // TODO(#10265): If the previous block does not exist, we should
@@ -635,6 +666,121 @@ impl Client {
                 },
             ));
         }
-        result.map(|_| None)
+        result
     }
+
+    pub fn handle_orphan_state_witness(
+        &mut self,
+        witness: ChunkStateWitness,
+    ) -> Result<HandleOrphanWitnessOutcome, Error> {
+        let chunk_header = &witness.inner.chunk_header;
+        let witness_height = chunk_header.height_created();
+        let witness_shard = chunk_header.shard_id();
+
+        // Don't save orphaned state witnesses which are far away from the current chain head.
+        let chain_head = &self.chain.head()?;
+        let head_distance = chain_head.height.abs_diff(witness_height);
+        if head_distance > MAX_ORPHAN_WITNESS_DISTANCE_FROM_HEAD {
+            tracing::debug!(
+                target: "client",
+                head_height = chain_head.height,
+                witness_height,
+                witness_shard,
+                witness_chunk = ?chunk_header.chunk_hash(),
+                "Not saving an orphaned ChunkStateWitness because it's far away from the chain head.");
+            return Ok(HandleOrphanWitnessOutcome::TooFarFromHead(head_distance));
+        }
+
+        // Don't save orphaned state witnesses which are bigger than the allowed limit.
+        let witness_size = borsh::to_vec(&witness)?.len();
+        if witness_size > MAX_ORPHAN_WITNESS_SIZE {
+            tracing::warn!(
+                target: "client",
+                witness_height,
+                witness_shard,
+                witness_size,
+                witness_chunk = ?chunk_header.chunk_hash(),
+                "Not saving an orphaned ChunkStateWitness because it's too big. This is unexpected.");
+            return Ok(HandleOrphanWitnessOutcome::TooBig(witness_size));
+        }
+
+        // Find EpochId based on height_created of the witness
+        let epoch_id = self
+            .epoch_manager
+            .epoch_id_from_height_around_tip(witness_height, &chain_head)?
+            .ok_or_else(|| {
+                Error::Other(format!(
+                    "Couldn't find EpochId for orphan chunk state witness with height {}",
+                    witness_height
+                ))
+            })?;
+
+        // Validate shard_id
+        if !self.epoch_manager.get_shard_layout(&epoch_id)?.shard_ids().contains(&witness_shard) {
+            return Err(Error::InvalidChunkStateWitness(format!(
+                "Invalid shard_id in ChunkStateWitness: {}",
+                witness_shard
+            )));
+        }
+
+        // Don't save orphan witnesses for chunks for which which we aren't a validator.
+        let Some(my_signer) = self.chunk_validator.my_signer.as_ref() else {
+            return Err(Error::NotAValidator);
+        };
+        let chunk_validator_assignments = self.epoch_manager.get_chunk_validator_assignments(
+            &epoch_id,
+            witness_shard,
+            witness_height,
+        )?;
+        if !chunk_validator_assignments.contains(my_signer.validator_id()) {
+            return Err(Error::NotAChunkValidator);
+        }
+
+        // Verify signature
+        if !self.epoch_manager.verify_chunk_state_witness_signature_in_epoch(&witness, &epoch_id)? {
+            return Err(Error::InvalidChunkStateWitness("Invalid signature".to_string()));
+        }
+
+        // Orphan witness is OK, save it to the pool
+        tracing::debug!(
+            target: "client",
+            witness_height,
+            witness_shard,
+            witness_chunk = ?chunk_header.chunk_hash(),
+            "Saving an orphaned ChunkStateWitness to orphan pool");
+        self.chunk_validator.orphan_witness_pool.add_orphan_state_witness(witness, witness_size);
+        Ok(HandleOrphanWitnessOutcome::SavedTooPool)
+    }
+
+    pub fn process_ready_orphan_chunk_state_witnesses(&mut self, accepted_block: &Block) {
+        let ready_witnesses = self
+            .chunk_validator
+            .orphan_witness_pool
+            .take_state_witnesses_waiting_for_block(accepted_block.hash());
+        for witness in ready_witnesses {
+            let chunk_header = &witness.inner.chunk_header;
+            tracing::debug!(
+                target: "client",
+                witness_height = chunk_header.height_created(),
+                witness_shard = chunk_header.shard_id(),
+                witness_chunk = ?chunk_header.chunk_hash(),
+                "Processing an orphaned ChunkStateWitness, its previous block has arrived."
+            );
+            if let Err(err) = self.process_chunk_state_witness_with_prev_block(
+                witness,
+                PeerId::random(), // TODO: Should peer_id even be here? https://github.com/near/stakewars-iv/issues/17
+                accepted_block,
+                None,
+            ) {
+                tracing::error!(target: "client", ?err, "Error processing orphan chunk state witness");
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleOrphanWitnessOutcome {
+    SavedTooPool,
+    TooBig(usize),
+    TooFarFromHead(u64),
 }
