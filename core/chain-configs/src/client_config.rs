@@ -298,7 +298,7 @@ pub fn default_enable_multiline_logging() -> Option<bool> {
 }
 
 pub fn default_produce_chunk_add_transactions_time_limit() -> Option<Duration> {
-    Some(Duration::from_millis(200))
+    Some(Duration::from_millis(500))
 }
 
 pub fn default_orphan_state_witness_pool_size() -> usize {

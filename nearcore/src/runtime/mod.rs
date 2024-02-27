@@ -1,7 +1,7 @@
 use crate::metrics;
 use crate::migrations::load_migration_data;
 use crate::NearConfig;
-
+use tracing::debug;
 use borsh::BorshDeserialize;
 use errors::FromStateViewerErrors;
 use near_chain::types::{
@@ -59,7 +59,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub mod errors;
 #[cfg(test)]
@@ -777,6 +777,7 @@ impl RuntimeAdapter for NightshadeRuntime {
         } else {
             usize::MAX
         };
+        tracing::debug!(target: "runtime", "Transaction RECEIPT COUNT LIMIT {}", new_receipt_count_limit);
 
         // In general, we limit the number of transactions via send_fees.
         // However, as a second line of defense, we want to limit the byte size
@@ -789,28 +790,35 @@ impl RuntimeAdapter for NightshadeRuntime {
             / (runtime_config.wasm_config.ext_costs.gas_cost(ExtCosts::storage_write_value_byte)
                 + runtime_config.wasm_config.ext_costs.gas_cost(ExtCosts::storage_read_value_byte));
 
+        let mut tgcount=0;
         // Add new transactions to the result until some limit is hit or the transactions run out.
         loop {
             if total_gas_burnt >= transactions_gas_limit {
                 result.limited_by = Some(PrepareTransactionsLimit::Gas);
+                //if true {panic!("Gas limit");}
+                debug!(target: "runtime", "EXC$ gas {}", transactions_gas_limit);
                 break;
             }
             if total_size >= size_limit {
                 result.limited_by = Some(PrepareTransactionsLimit::Size);
+                debug!(target: "runtime", "EXC$ size {}", size_limit);
                 break;
             }
             if result.transactions.len() >= new_receipt_count_limit {
                 result.limited_by = Some(PrepareTransactionsLimit::ReceiptCount);
+                debug!(target: "runtime", "EXC$ len {}", new_receipt_count_limit);
                 break;
             }
             if let Some(time_limit) = &time_limit {
                 if start_time.elapsed() >= *time_limit {
                     result.limited_by = Some(PrepareTransactionsLimit::Time);
+                    debug!(target: "runtime", "EXC$ time");
                     break;
                 }
             }
 
             if let Some(iter) = transaction_groups.next() {
+                tgcount+=1;
                 while let Some(tx) = iter.next() {
                     num_checked_transactions += 1;
                     // Verifying the transaction is on the same chain and hasn't expired yet.
@@ -835,7 +843,7 @@ impl RuntimeAdapter for NightshadeRuntime {
                             total_gas_burnt += verification_result.gas_burnt;
                             total_size += tx.get_size();
                             result.transactions.push(tx);
-                            break;
+                            //break;
                         }
                         Err(RuntimeError::InvalidTxError(err)) => {
                             tracing::trace!(target: "runtime", tx=?tx.get_hash(), ?err, "discarding transaction that is invalid");
@@ -853,6 +861,7 @@ impl RuntimeAdapter for NightshadeRuntime {
             }
         }
         debug!(target: "runtime", "Transaction filtering results {} valid out of {} pulled from the pool", result.transactions.len(), num_checked_transactions);
+        debug!(target: "runtime", "Transaction filtering ITERATED {} groups", tgcount);
         metrics::PREPARE_TX_SIZE
             .with_label_values(&[&shard_id.to_string()])
             .observe(total_size as f64);
@@ -911,9 +920,7 @@ impl RuntimeAdapter for NightshadeRuntime {
             Ok(result) => Ok(result),
             Err(e) => match e {
                 Error::StorageError(err) => match &err {
-                    StorageError::FlatStorageBlockNotSupported(_)
-                    | StorageError::MissingTrieValue(..) => Err(err.into()),
-                    _ => panic!("{err}"),
+                    _ => Err(err.into()),
                 },
                 _ => Err(e),
             },

@@ -370,7 +370,10 @@ impl JsonRpcHandler {
                 .await
             }
             "broadcast_tx_commit" => {
-                process_method_call(request, |params| self.send_tx_commit(params)).await
+                process_method_call(request, |params| self.send_tx_commit(params, true)).await
+            }
+            "broadcast_tx_commit_fast" => {
+                process_method_call(request, |params| self.send_tx_commit(params, false)).await
             }
             "chunk" => process_method_call(request, |params| self.chunk(params)).await,
             "gas_price" => process_method_call(request, |params| self.gas_price(params)).await,
@@ -708,13 +711,14 @@ impl JsonRpcHandler {
     async fn send_tx_commit(
         &self,
         request_data: near_jsonrpc_primitives::types::transactions::RpcSendTransactionRequest,
+        waiting: bool,
     ) -> Result<
         near_jsonrpc_primitives::types::transactions::RpcTransactionResponse,
         near_jsonrpc_primitives::types::transactions::RpcTransactionError,
     > {
         self.send_tx(RpcSendTransactionRequest {
             signed_transaction: request_data.signed_transaction,
-            wait_until: TxExecutionStatus::Final,
+            wait_until: if waiting { TxExecutionStatus::Final } else { TxExecutionStatus::None },
         })
         .await
     }

@@ -50,7 +50,10 @@ impl ShardedTransactionPool {
     }
 
     pub fn get_pool_iterator(&mut self, shard_uid: ShardUId) -> Option<PoolIteratorWrapper<'_>> {
-        self.tx_pools.get_mut(&shard_uid).map(|pool| pool.pool_iterator())
+        self.tx_pools.get_mut(&shard_uid).map(|pool| {
+            pool.debug();
+            pool.pool_iterator()
+        })
     }
 
     /// Tries to insert the transaction into the pool for a given shard.

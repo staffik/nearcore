@@ -204,7 +204,7 @@ impl From<&GenesisConfig> for EpochConfig {
             online_max_threshold: config.online_max_threshold,
             protocol_upgrade_stake_threshold: config.protocol_upgrade_stake_threshold,
             minimum_stake_divisor: config.minimum_stake_divisor,
-            shard_layout: config.shard_layout.clone(),
+            shard_layout: ShardLayout::v0_single_shard(),//config.shard_layout.clone(),
             validator_selection_config: near_primitives::epoch_manager::ValidatorSelectionConfig {
                 num_chunk_only_producer_seats: config.num_chunk_only_producer_seats,
                 minimum_validators_per_shard: config.minimum_validators_per_shard,
