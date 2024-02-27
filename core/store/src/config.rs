@@ -280,7 +280,7 @@ impl Default for StoreConfig {
             // It will speed up processing of shards where it is enabled, but
             // requires more RAM and takes several minutes on startup.
             load_mem_tries_for_shards: Default::default(),
-            load_mem_tries_for_all_shards: true,
+            load_mem_tries_for_all_shards: false,
 
             migration_snapshot: Default::default(),
 
