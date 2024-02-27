@@ -2,9 +2,9 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::types::{PoolKey, TransactionGroup, TransactionGroupIterator};
-use near_o11y::tracing;
 use near_crypto::PublicKey;
 use near_o11y::metrics::prometheus::core::{AtomicI64, GenericGauge};
+use near_o11y::tracing;
 use near_primitives::epoch_manager::RngSeed;
 use near_primitives::hash::{hash, CryptoHash};
 use near_primitives::transaction::SignedTransaction;
@@ -43,6 +43,9 @@ pub struct TransactionPool {
     /// Metrics tracked for transaction pool.
     transaction_pool_count_metric: GenericGauge<AtomicI64>,
     transaction_pool_size_metric: GenericGauge<AtomicI64>,
+    metric_size1: GenericGauge<AtomicI64>,
+    metric_size2: GenericGauge<AtomicI64>,
+    metric_size3: GenericGauge<AtomicI64>,
 }
 
 impl TransactionPool {
@@ -55,6 +58,9 @@ impl TransactionPool {
             metrics::TRANSACTION_POOL_COUNT.with_label_values(&[metrics_label]);
         let transaction_pool_size_metric =
             metrics::TRANSACTION_POOL_SIZE.with_label_values(&[metrics_label]);
+        let metric_size1 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
+        let metric_size2 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
+        let metric_size3 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
         // A `get()` call initializes a metric even if its value is zero.
         transaction_pool_count_metric.get();
         transaction_pool_size_metric.get();
@@ -68,6 +74,9 @@ impl TransactionPool {
             total_transaction_size: 0,
             transaction_pool_count_metric,
             transaction_pool_size_metric,
+            metric_size1,
+            metric_size2,
+            metric_size3,
         }
     }
 
@@ -79,7 +88,13 @@ impl TransactionPool {
     }
 
     pub fn debug(&self) {
-        tracing::debug!(target: "runtime", "$LOL$ pool size {} {}", self.unique_transactions.len(), self.transactions.len());
+        let size1 = self.unique_transactions.len();
+        let size2 = self.transactions.len();
+        let size3 = self.transactions.values().fold(0, |s, v| s + v.len());
+        self.metric_size1.set(size1 as i64);
+        self.metric_size2.set(size2 as i64);
+        self.metric_size3.set(size3 as i64);
+        tracing::debug!(target: "runtime", "$LOL$ pool size {size1} {size2} {size3}");
     }
 
     /// Inserts a signed transaction that passed validation into the pool.
