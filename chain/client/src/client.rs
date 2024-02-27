@@ -989,6 +989,7 @@ impl Client {
                 state_patch: Default::default(),
                 record_storage,
             };
+            
             runtime.prepare_transactions(
                 storage_config,
                 PrepareTransactionsChunkContext { shard_id, gas_limit: chunk_extra.gas_limit() },

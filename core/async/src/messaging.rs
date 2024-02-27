@@ -87,7 +87,7 @@ impl<M, R: Send + 'static, A: CanSend<MessageWithCallback<M, R>> + ?Sized> SendA
         // Dropped error.
         let (sender, receiver) = oneshot::channel::<Result<R, AsyncSendError>>();
         let future = async move { receiver.await.unwrap_or_else(|_| Err(AsyncSendError::Dropped)) };
-        let responder = Box::new(move |r| sender.send(r).ok().unwrap());
+        let responder = Box::new(move |r| { let _ = sender.send(r); });
         self.send(MessageWithCallback { message, callback: responder });
         future.boxed()
     }

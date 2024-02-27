@@ -2,7 +2,7 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::types::{PoolKey, TransactionGroup, TransactionGroupIterator};
-
+use near_o11y::tracing;
 use near_crypto::PublicKey;
 use near_o11y::metrics::prometheus::core::{AtomicI64, GenericGauge};
 use near_primitives::epoch_manager::RngSeed;
@@ -76,6 +76,10 @@ impl TransactionPool {
         v.extend_from_slice(&self.key_seed);
         v.extend_from_slice(account_id.as_bytes());
         hash(&v)
+    }
+
+    pub fn debug(&self) {
+        tracing::debug!(target: "runtime", "$LOL$ pool size {} {}", self.unique_transactions.len(), self.transactions.len());
     }
 
     /// Inserts a signed transaction that passed validation into the pool.
