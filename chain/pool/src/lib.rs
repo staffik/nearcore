@@ -59,8 +59,8 @@ impl TransactionPool {
         let transaction_pool_size_metric =
             metrics::TRANSACTION_POOL_SIZE.with_label_values(&[metrics_label]);
         let metric_size1 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
-        let metric_size2 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
-        let metric_size3 = metrics::TRANSACTION_POOL_SIZE1.with_label_values(&[metrics_label]);
+        let metric_size2 = metrics::TRANSACTION_POOL_SIZE2.with_label_values(&[metrics_label]);
+        let metric_size3 = metrics::TRANSACTION_POOL_SIZE3.with_label_values(&[metrics_label]);
         // A `get()` call initializes a metric even if its value is zero.
         transaction_pool_count_metric.get();
         transaction_pool_size_metric.get();
