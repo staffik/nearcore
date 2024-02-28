@@ -8,6 +8,7 @@ use super::ValuePtr;
 use super::{HostError, VMLogicError};
 use crate::ProfileDataV3;
 use near_crypto::Secp256K1Signature;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
 use near_parameters::vm::{Config, StorageGetMode};
 use near_parameters::{
     transfer_exec_fee, transfer_send_fee, ActionCosts, ExtCosts, RuntimeFeesConfig,
@@ -127,9 +128,14 @@ impl PublicKeyBuffer {
 }
 
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-pub static VMLOGIC_TIME: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+pub static VMLOGIC_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_logic_storage_time",
+        "Total time used for storage operations by VM Logic",
+    )
+    .unwrap()
+});
 
 impl<'a> VMLogic<'a> {
     pub fn new(
@@ -2331,7 +2337,7 @@ impl<'a> VMLogic<'a> {
             )
             .map_err(|_| HostError::BadUTF8)?;
         let elapsed = start.elapsed().as_nanos() as u64;
-        VMLOGIC_TIME.fetch_add(elapsed, Ordering::SeqCst);
+        VMLOGIC_TIME.inc_by(elapsed);
         Ok(account_id)
     }
 
@@ -2450,7 +2456,7 @@ impl<'a> VMLogic<'a> {
             }
         };
         let elapsed = start.elapsed().as_nanos() as u64;
-        VMLOGIC_TIME.fetch_add(elapsed, Ordering::SeqCst);
+        VMLOGIC_TIME.inc_by(elapsed);
         res
     }
 
@@ -2531,7 +2537,7 @@ impl<'a> VMLogic<'a> {
             None => Ok(0),
         };
         let elapsed = start.elapsed().as_nanos() as u64;
-        VMLOGIC_TIME.fetch_add(elapsed, Ordering::SeqCst);
+        VMLOGIC_TIME.inc_by(elapsed);
         res
     }
 
@@ -2620,7 +2626,7 @@ impl<'a> VMLogic<'a> {
             None => Ok(0),
         };
         let elapsed = start.elapsed().as_nanos() as u64;
-        VMLOGIC_TIME.fetch_add(elapsed, Ordering::SeqCst);
+        VMLOGIC_TIME.inc_by(elapsed);
         res
     }
 
@@ -2668,7 +2674,7 @@ impl<'a> VMLogic<'a> {
 
         self.gas_counter.add_trie_fees(&nodes_delta)?;
         let elapsed = start.elapsed().as_nanos() as u64;
-        VMLOGIC_TIME.fetch_add(elapsed, Ordering::SeqCst);
+        VMLOGIC_TIME.inc_by(elapsed);
         Ok(res? as u64)
     }
 

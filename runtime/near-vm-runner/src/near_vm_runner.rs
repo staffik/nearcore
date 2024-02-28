@@ -13,6 +13,7 @@ use crate::prepare;
 use crate::runner::VMResult;
 use crate::{get_contract_cache_key, imports, ContractCode};
 use memoffset::offset_of;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
 use near_parameters::vm::VMKind;
 use near_parameters::RuntimeFeesConfig;
 use near_vm_compiler_singlepass::Singlepass;
@@ -27,6 +28,7 @@ use std::borrow::Cow;
 use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct NearVmMemory(Arc<LinearMemory>);
@@ -655,6 +657,16 @@ impl<'a> finite_wasm::wasmparser::VisitOperator<'a> for GasCostCfg {
     finite_wasm::wasmparser::for_each_operator!(gas_cost);
 }
 
+use once_cell::sync::Lazy;
+
+pub static VMRUNNER_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_runner_time",
+        "Total time used for contract execution",
+    )
+    .unwrap()
+});
+
 impl crate::runner::VM for NearVM {
     fn run(
         &self,
@@ -699,10 +711,16 @@ impl crate::runner::VM for NearVM {
         if let Err(e) = get_entrypoint_index(&*artifact, method_name) {
             return Ok(VMOutcome::abort_but_nop_outcome_in_old_protocol(logic, e));
         }
-        match self.run_method(&artifact, import, method_name)? {
+
+        let start = Instant::now();
+
+        let res = match self.run_method(&artifact, import, method_name)? {
             Ok(()) => Ok(VMOutcome::ok(logic)),
             Err(err) => Ok(VMOutcome::abort(logic, err)),
-        }
+        };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMRUNNER_TIME.inc_by(elapsed);
+        res
     }
 
     fn precompile(
