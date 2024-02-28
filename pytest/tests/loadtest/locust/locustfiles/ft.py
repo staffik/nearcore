@@ -29,7 +29,7 @@ class FTTransferUser(NearUser):
     def ft_transfer(self):
         current_time = datetime.now()
         difference = current_time - self.start_time
-        if difference < timedelta(minutes=5):
+        if difference < timedelta(minutes=2):
             return
         receiver = self.ft.random_receiver(self.account_id)
         tx = TransferFT(self.ft.account, self.account, receiver, how_much=1)
