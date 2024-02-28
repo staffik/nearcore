@@ -4503,6 +4503,7 @@ dependencies = [
  "hex",
  "memoffset 0.8.0",
  "near-crypto",
+ "near-o11y",
  "near-parameters",
  "near-primitives-core",
  "near-stdx",
