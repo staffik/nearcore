@@ -228,19 +228,19 @@ impl Default for StoreConfig {
             // that increase to 25 GiB (we've used this big value to estimate
             // performance improvement headroom) having `max_open_files` at 10k
             // improved performance of state viewer by 60%.
-            col_state_cache_size: bytesize::ByteSize::mib(1),
+            col_state_cache_size: bytesize::ByteSize::mib(512),
 
             // This value was tuned in after we removed filter and index block from block cache
             // and slightly improved read speed for FlatState and reduced memory footprint in
             // #9389.
-            col_flat_state_cache_size: bytesize::ByteSize::mib(1),
+            col_flat_state_cache_size: bytesize::ByteSize::mib(128),
 
             // This value was taken from the Openethereum default parameter and
             // we use it since then.
             block_size: bytesize::ByteSize::kib(16),
 
             trie_cache: TrieCacheConfig {
-                default_max_bytes: bytesize::ByteSize::mb(1),
+                default_max_bytes: bytesize::ByteSize::mb(500),
                 // TODO(resharding) The cache size needs to adjusted for every resharding.
                 // Make that automatic e.g. by defining the minimum cache size per account rather than shard.
                 per_shard_max_bytes: HashMap::from_iter([
@@ -249,13 +249,13 @@ impl Default for StoreConfig {
                     // of the largest contract storage size we are aware as of 23/08/2022.
                     // Note: on >= 1.34 nearcore version use 1gb if you have minimal hardware.
                     // In simple nightshade the heavy contract "token.sweat" is in shard 3
-                    (ShardUId { version: 1, shard_id: 3 }, bytesize::ByteSize::mb(1)),
+                    (ShardUId { version: 1, shard_id: 3 }, bytesize::ByteSize::gb(3)),
                     // In simple nightshade v2 the heavy contract "token.sweat" is in shard 4
-                    (ShardUId { version: 2, shard_id: 4 }, bytesize::ByteSize::mb(1)),
+                    (ShardUId { version: 2, shard_id: 4 }, bytesize::ByteSize::gb(3)),
                     // Shard 1 is dedicated to aurora and it had very few cache
                     // misses even with cache size of only 50MB
-                    (ShardUId { version: 1, shard_id: 1 }, bytesize::ByteSize::mb(1)),
-                    (ShardUId { version: 2, shard_id: 1 }, bytesize::ByteSize::mb(1)),
+                    (ShardUId { version: 1, shard_id: 1 }, bytesize::ByteSize::mb(50)),
+                    (ShardUId { version: 2, shard_id: 1 }, bytesize::ByteSize::mb(50)),
                 ]),
                 shard_cache_deletions_queue_capacity: DEFAULT_SHARD_CACHE_DELETIONS_QUEUE_CAPACITY,
             },
