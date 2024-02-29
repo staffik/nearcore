@@ -662,6 +662,14 @@ use once_cell::sync::Lazy;
 pub static VMRUNNER_TIME: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter("near_vm_runner_time", "Total time used for contract execution").unwrap()
 });
+pub static VMRUNNER_LOAD_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_runner_load_time", "Total time used for contract execution")
+        .unwrap()
+});
+pub static VMRUNNER_BUILD_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_runner_build_time", "Total time used for contract execution")
+        .unwrap()
+});
 
 pub static VMRUNNER_WITH_INIT_TIME: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
@@ -701,6 +709,7 @@ impl crate::runner::VM for NearVM {
             return Ok(VMOutcome::abort(logic, e));
         }
 
+        let start2 = Instant::now();
         let artifact = self.compile_and_load(code, cache)?;
         let artifact = match artifact {
             Ok(it) => it,
@@ -708,7 +717,10 @@ impl crate::runner::VM for NearVM {
                 return Ok(VMOutcome::abort(logic, FunctionCallError::CompilationError(err)));
             }
         };
+        let elapsed = start2.elapsed().as_nanos() as u64;
+        VMRUNNER_LOAD_TIME.inc_by(elapsed);
 
+        let start3 = Instant::now();
         let result = logic.after_loading_executable(code.code().len());
         if let Err(e) = result {
             return Ok(VMOutcome::abort(logic, e));
@@ -717,6 +729,8 @@ impl crate::runner::VM for NearVM {
         if let Err(e) = get_entrypoint_index(&*artifact, method_name) {
             return Ok(VMOutcome::abort_but_nop_outcome_in_old_protocol(logic, e));
         }
+        let elapsed = start3.elapsed().as_nanos() as u64;
+        VMRUNNER_BUILD_TIME.inc_by(elapsed);
 
         let start = Instant::now();
 
