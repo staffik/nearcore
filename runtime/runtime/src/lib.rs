@@ -171,6 +171,17 @@ pub struct ActionResult {
     pub profile: Box<ProfileDataV3>,
 }
 
+use once_cell::sync::Lazy;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
+
+pub static RUNTIME_APPLY_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_runtime_apply_time",
+        "Total time used for runtime::apply()",
+    )
+    .unwrap()
+});
+
 impl ActionResult {
     pub fn merge(&mut self, mut next_result: ActionResult) -> Result<(), RuntimeError> {
         assert!(next_result.gas_burnt_for_function_call <= next_result.gas_burnt);
@@ -1230,6 +1241,7 @@ impl Runtime {
         epoch_info_provider: &dyn EpochInfoProvider,
         state_patch: SandboxStatePatch,
     ) -> Result<ApplyResult, RuntimeError> {
+        let start = Instant::now();
         // state_patch must be empty unless this is sandbox build.  Thanks to
         // conditional compilation this always resolves to true so technically
         // the check is not necessary.  It’s defence in depth to make sure any
@@ -1536,7 +1548,7 @@ impl Runtime {
 
         let state_root = trie_changes.new_root;
         let proof = trie.recorded_storage();
-        Ok(ApplyResult {
+        let x = Ok(ApplyResult {
             state_root,
             trie_changes,
             validator_proposals: unique_proposals,
@@ -1548,7 +1560,10 @@ impl Runtime {
             proof,
             delayed_receipts_count: delayed_receipts_indices.len(),
             metrics: Some(metrics),
-        })
+        });
+        let elapsed = start.elapsed().as_nanos() as u64;
+        RUNTIME_APPLY_TIME.inc_by(elapsed);
+        x
     }
 
     fn apply_state_patch(&self, state_update: &mut TrieUpdate, state_patch: SandboxStatePatch) {
