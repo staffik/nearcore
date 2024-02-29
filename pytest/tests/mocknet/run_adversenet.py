@@ -85,8 +85,8 @@ def override_config(node, config):
     # Add config here depending on the specific node build.
     config["consensus"]["min_num_peers"] = 0
     if "validator" in node.instance_name:
-        config["store"]["col_state_cache_size"] = 1048576
-        config["store"]["col_flat_state_cache_size"] = 1048576
+        #config["store"]["col_state_cache_size"] = 1048576
+        #config["store"]["col_flat_state_cache_size"] = 1048576
         config["store"]["trie_cache"]["default_max_bytes"] = 1000000
         config["store"]["trie_cache"]["per_shard_max_bytes"]["s1.v1"] = 1000000
         config["store"]["trie_cache"]["per_shard_max_bytes"]["s1.v2"] = 1000000

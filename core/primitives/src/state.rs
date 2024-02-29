@@ -75,7 +75,7 @@ impl FlatStateValue {
     /// stored as `FlatStateValue::Inlined`.
     /// See the following comment for reasoning behind the threshold value:
     /// https://github.com/near/nearcore/issues/8243#issuecomment-1523049994
-    pub const INLINE_DISK_VALUE_THRESHOLD: usize = 4000;
+    pub const INLINE_DISK_VALUE_THRESHOLD: usize = 32_000;
 
     pub fn on_disk(value: &[u8]) -> Self {
         if value.len() <= Self::INLINE_DISK_VALUE_THRESHOLD {

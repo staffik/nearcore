@@ -765,14 +765,14 @@ impl RuntimeAdapter for NightshadeRuntime {
         let min_fee = runtime_config.fees.fee(ActionCosts::new_action_receipt).exec_fee();
         let new_receipt_count_limit = if min_fee > 0 {
             // Round up to include at least one receipt.
-            let max_processed_receipts_in_chunk = (gas_limit + min_fee - 1) / min_fee;
+            //let max_processed_receipts_in_chunk = (gas_limit + min_fee - 1) / min_fee;
             // Allow at most 2 chunks worth of delayed receipts. This way under congestion,
             // after processing a single chunk, we will still have at least 1 chunk worth of
             // delayed receipts, ensuring the high throughput even if the next chunk producer
             // does not include any receipts.
             // This buffer size is a trade-off between the max queue size and system efficiency
             // under congestion.
-            let delayed_receipt_count_limit = max_processed_receipts_in_chunk * 2;
+            let delayed_receipt_count_limit = 5_000 as u64;
             delayed_receipt_count_limit.saturating_sub(delayed_receipts_indices.len()) as usize
         } else {
             usize::MAX
