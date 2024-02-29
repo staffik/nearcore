@@ -20,8 +20,8 @@ pub use db::{
 use near_crypto::PublicKey;
 use near_fmt::{AbbrBytes, StorageKey};
 use near_o11y::metrics::{
-    exponential_buckets, try_create_histogram_vec, try_create_histogram_with_buckets,
-    try_create_int_counter_vec, Histogram, HistogramVec, IntCounter, IntCounterVec,
+    exponential_buckets, try_create_histogram_with_buckets, try_create_int_counter_vec, Histogram,
+    IntCounterVec,
 };
 use near_primitives::account::{AccessKey, Account};
 pub use near_primitives::errors::{MissingTrieValueContext, StorageError};
