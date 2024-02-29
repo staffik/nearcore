@@ -841,9 +841,12 @@ impl RuntimeAdapter for NightshadeRuntime {
                             tracing::trace!(target: "runtime", tx=?tx.get_hash(), "including transaction that passed validation");
                             state_update.commit(StateChangeCause::NotWritableToDisk);
                             total_gas_burnt += verification_result.gas_burnt;
+                            if num_checked_transactions % 100 == 0 {
+                                debug!(target: "runtime", "$GAS$ burnt {}", verification_result.gas_burnt);
+                            }
                             total_size += tx.get_size();
                             result.transactions.push(tx);
-                            //break;
+                            break;
                         }
                         Err(RuntimeError::InvalidTxError(err)) => {
                             tracing::trace!(target: "runtime", tx=?tx.get_hash(), ?err, "discarding transaction that is invalid");
