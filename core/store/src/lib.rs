@@ -19,6 +19,10 @@ pub use db::{
 };
 use near_crypto::PublicKey;
 use near_fmt::{AbbrBytes, StorageKey};
+use near_o11y::metrics::{
+    exponential_buckets, try_create_histogram_vec, try_create_histogram_with_buckets,
+    try_create_int_counter_vec, Histogram, HistogramVec, IntCounter, IntCounterVec,
+};
 use near_primitives::account::{AccessKey, Account};
 pub use near_primitives::errors::{MissingTrieValueContext, StorageError};
 use near_primitives::hash::CryptoHash;
@@ -644,6 +648,10 @@ impl fmt::Debug for StoreUpdate {
     }
 }
 
+pub static NEAR_GET_TRIE_KEYS: Lazy<IntCounterVec> = Lazy::new(|| {
+    try_create_int_counter_vec("near_get_trie_keys", "near_get_trie_keys", &["prefix"]).unwrap()
+});
+
 /// Reads an object from Trie.
 /// # Errors
 /// see StorageError
@@ -651,6 +659,8 @@ pub fn get<T: BorshDeserialize>(
     trie: &dyn TrieAccess,
     key: &TrieKey,
 ) -> Result<Option<T>, StorageError> {
+    let p = key.to_vec()[0];
+    NEAR_GET_TRIE_KEYS.with_label_values(&[&p.to_string()]).inc();
     match trie.get(key)? {
         None => Ok(None),
         Some(data) => match T::try_from_slice(&data) {
@@ -662,9 +672,21 @@ pub fn get<T: BorshDeserialize>(
     }
 }
 
+pub(crate) static NEAR_DELAYED_RECEIPT_SIZE: Lazy<Histogram> = Lazy::new(|| {
+    try_create_histogram_with_buckets(
+        "near_delayed_receipt_size",
+        "near_delayed_receipt_size",
+        exponential_buckets(1.0, 1.6, 30).unwrap(),
+    )
+    .unwrap()
+});
+
 /// Writes an object into Trie.
 pub fn set<T: BorshSerialize>(state_update: &mut TrieUpdate, key: TrieKey, value: &T) {
     let data = borsh::to_vec(&value).expect("Borsh serializer is not expected to ever fail");
+    if let TrieKey::DelayedReceipt { .. } = &key {
+        NEAR_DELAYED_RECEIPT_SIZE.observe(data.len() as f64);
+    }
     state_update.set(key, data);
 }
 

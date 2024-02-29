@@ -53,6 +53,7 @@ use near_vm_runner::ProfileDataV3;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::debug;
 
 mod actions;
@@ -1312,6 +1313,7 @@ impl Runtime {
         let mut total_gas_burnt = gas_used_for_migrations;
         let mut total_compute_usage = total_gas_burnt;
         let mut metrics = metrics::ApplyMetrics::default();
+        let time = Instant::now();
 
         for signed_transaction in transactions {
             let (receipt, outcome_with_id) = self.process_transaction(
@@ -1344,7 +1346,7 @@ impl Runtime {
 
             outcomes.push(outcome_with_id);
         }
-        metrics.tx_processing_done(total_gas_burnt, total_compute_usage);
+        metrics.tx_processing_done(total_gas_burnt, total_compute_usage, time);
 
         let mut process_receipt = |receipt: &Receipt,
                                    state_update: &mut TrieUpdate,
@@ -1398,6 +1400,7 @@ impl Runtime {
         // TODO(#8859): Introduce a dedicated `compute_limit` for the chunk.
         // For now compute limit always matches the gas limit.
         let compute_limit = apply_state.gas_limit.unwrap_or(Gas::max_value());
+        let time = Instant::now();
 
         // We first process local receipts. They contain staking, local contract calls, etc.
         if let Some(prefetcher) = &mut prefetcher {
@@ -1419,8 +1422,9 @@ impl Runtime {
                 set_delayed_receipt(&mut state_update, &mut delayed_receipts_indices, receipt);
             }
         }
-        metrics.local_receipts_done(total_gas_burnt, total_compute_usage);
+        metrics.local_receipts_done(total_gas_burnt, total_compute_usage, time);
 
+        let time = Instant::now();
         // Then we process the delayed receipts. It's a backlog of receipts from the past blocks.
         while delayed_receipts_indices.first_index < delayed_receipts_indices.next_available_index {
             if total_compute_usage >= compute_limit {
@@ -1464,9 +1468,10 @@ impl Runtime {
             )?;
             processed_delayed_receipts.push(receipt);
         }
-        metrics.delayed_receipts_done(total_gas_burnt, total_compute_usage);
+        metrics.delayed_receipts_done(total_gas_burnt, total_compute_usage, time);
 
         // And then we process the new incoming receipts. These are receipts from other shards.
+        let time = Instant::now();
         if let Some(prefetcher) = &mut prefetcher {
             prefetcher.clear();
             // Prefetcher is allowed to fail
@@ -1492,7 +1497,7 @@ impl Runtime {
                 set_delayed_receipt(&mut state_update, &mut delayed_receipts_indices, receipt);
             }
         }
-        metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage);
+        metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage, time);
 
         // No more receipts are executed on this trie, stop any pending prefetches on it.
         if let Some(prefetcher) = &prefetcher {
