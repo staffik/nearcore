@@ -206,7 +206,7 @@ impl crate::TrieAccess for TrieUpdate {
         code_hash: Option<CryptoHash>,
     ) -> Result<Option<Arc<[u8]>>, StorageError> {
         match code_hash {
-            None => self.get(key),
+            None => self.get(key).map(|v| v.map(|v| v.into())),
             Some(code_hash) => {
                 CCCACHE2_GETS.inc();
                 if let Some(code) = self.contract_codes.borrow().get(&code_hash) {
