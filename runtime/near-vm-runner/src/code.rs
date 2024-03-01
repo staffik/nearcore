@@ -19,7 +19,7 @@ impl ContractCode {
     }
 
     pub fn into_code(self) -> Vec<u8> {
-        self.code.into()
+        self.code.to_vec()
     }
 
     pub fn hash(&self) -> &CryptoHash {
