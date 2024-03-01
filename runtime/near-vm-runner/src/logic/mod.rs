@@ -33,7 +33,7 @@ pub enum CompiledContract {
 }
 
 /// Cache for compiled modules
-pub trait CompiledContractCache: Send + Sync {
+pub trait CompiledContractCache: Send {
     fn put(&self, key: &CryptoHash, value: CompiledContract) -> std::io::Result<()>;
     fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContract>>;
     fn hack_put(&self, _key: &CryptoHash, _value: VMArtifact) -> std::io::Result<()> {
