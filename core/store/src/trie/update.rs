@@ -3,6 +3,7 @@ use super::{OptimizedValueRef, Trie};
 use crate::trie::{KeyLookupMode, TrieChanges};
 use crate::StorageError;
 use near_o11y::metrics::{try_create_int_counter, try_create_int_gauge, IntCounter, IntGauge};
+use near_primitives::hash::CryptoHash;
 use near_primitives::trie_key::TrieKey;
 use near_primitives::types::{
     RawStateChange, RawStateChanges, RawStateChangesWithTrieKey, StateChangeCause, StateRoot,
@@ -29,7 +30,7 @@ pub struct TrieUpdate {
     pub trie: Trie,
     committed: RawStateChanges,
     prospective: TrieUpdates,
-    contract_codes: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    contract_codes: RefCell<HashMap<CryptoHash, Vec<u8>>>,
 }
 
 pub enum TrieUpdateValuePtr<'a> {
@@ -113,11 +114,15 @@ impl TrieUpdate {
         self.trie.contains_key(&key)
     }
 
+    pub fn get_code(
+        &self,
+        key: &TrieKey,
+        code_hash: Option<CryptoHash>,
+    ) -> Result<Option<Vec<u8>>, StorageError> {
+        self.get(key)
+    }
+
     pub fn get(&self, key: &TrieKey) -> Result<Option<Vec<u8>>, StorageError> {
-        let is_code = match &key {
-            TrieKey::ContractCode { .. } => true,
-            _ => false,
-        };
         let key = key.to_vec();
         if let Some(key_value) = self.prospective.get(&key) {
             return Ok(key_value.value.as_ref().map(<Vec<u8>>::clone));
@@ -125,23 +130,9 @@ impl TrieUpdate {
             if let Some(RawStateChange { data, .. }) = changes_with_trie_key.changes.last() {
                 return Ok(data.as_ref().map(<Vec<u8>>::clone));
             }
-        } else if is_code {
-            CCCACHE2_GETS.inc();
-            if let Some(code) = self.contract_codes.borrow().get(&key) {
-                CCCACHE2_HITS.inc();
-                return Ok(Some(code.clone()));
-            }
         }
 
-        let result = self.trie.get(&key);
-        if is_code {
-            if let Ok(Some(code)) = &result {
-                CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
-                CCCACHE2_PUTS.inc();
-                self.contract_codes.borrow_mut().insert(key, code.clone());
-            }
-        }
-        result
+        self.trie.get(&key)
     }
 
     pub fn set(&mut self, trie_key: TrieKey, value: Vec<u8>) {
@@ -214,6 +205,31 @@ impl TrieUpdate {
 impl crate::TrieAccess for TrieUpdate {
     fn get(&self, key: &TrieKey) -> Result<Option<Vec<u8>>, StorageError> {
         TrieUpdate::get(self, key)
+    }
+
+    fn get_code(
+        &self,
+        key: &TrieKey,
+        code_hash: Option<CryptoHash>,
+    ) -> Result<Option<Vec<u8>>, StorageError> {
+        match code_hash {
+            None => self.get(key),
+            Some(code_hash) => {
+                CCCACHE2_GETS.inc();
+                if let Some(code) = self.contract_codes.borrow().get(&code_hash) {
+                    CCCACHE2_HITS.inc();
+                    return Ok(Some(code.clone()));
+                }
+
+                let result = self.get(key);
+                if let Ok(Some(code)) = &result {
+                    CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
+                    CCCACHE2_PUTS.inc();
+                    self.contract_codes.borrow_mut().insert(code_hash, code.clone());
+                }
+                result
+            }
+        }
     }
 
     fn contains_key(&self, key: &TrieKey) -> Result<bool, StorageError> {
