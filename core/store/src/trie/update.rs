@@ -8,7 +8,6 @@ use near_primitives::types::{
     RawStateChange, RawStateChanges, RawStateChangesWithTrieKey, StateChangeCause, StateRoot,
     TrieCacheMode,
 };
-use near_vm_runner::ContractCode;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
