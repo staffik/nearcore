@@ -7,6 +7,7 @@ use crate::receipt_manager::ReceiptManager;
 use crate::{metrics, ActionResult, ApplyState};
 
 use near_crypto::PublicKey;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
 use near_parameters::{AccountCreationConfig, ActionCosts, RuntimeConfig, RuntimeFeesConfig};
 use near_primitives::account::{AccessKey, AccessKeyPermission, Account};
 use near_primitives::action::delegate::{DelegateAction, SignedDelegateAction};
@@ -42,6 +43,7 @@ use near_vm_runner::ContractCode;
 use near_wallet_contract::{wallet_contract, wallet_contract_magic_bytes};
 
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Returns `ContractCode` (if exists) for the given `account` or returns `StorageError`.
 /// For ETH-implicit accounts returns `Wallet Contract` implementation that it is a part
@@ -185,6 +187,14 @@ pub(crate) fn execute_function_call(
     }
     Ok(outcome)
 }
+use once_cell::sync::Lazy;
+pub static EXEC_FN: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_exec_fn",
+        "",
+    )
+    .unwrap()
+});
 
 pub(crate) fn action_function_call(
     state_update: &mut TrieUpdate,
@@ -219,6 +229,7 @@ pub(crate) fn action_function_call(
         epoch_info_provider,
         apply_state.current_protocol_version,
     );
+    let start = Instant::now();
     let outcome = execute_function_call(
         apply_state,
         &mut runtime_ext,
@@ -232,6 +243,8 @@ pub(crate) fn action_function_call(
         is_last_action,
         None,
     )?;
+    let elapsed = start.elapsed().as_nanos() as u64;
+        EXEC_FN.inc_by(elapsed);
 
     match &outcome.aborted {
         None => {

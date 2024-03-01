@@ -182,6 +182,22 @@ pub static RUNTIME_APPLY_TIME: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static ACTION_FN: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_action_fn",
+        "",
+    )
+    .unwrap()
+});
+
+pub static PROCESS_RCPT: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_process_rcpt",
+        "",
+    )
+    .unwrap()
+});
+
 impl ActionResult {
     pub fn merge(&mut self, mut next_result: ActionResult) -> Result<(), RuntimeError> {
         assert!(next_result.gas_burnt_for_function_call <= next_result.gas_burnt);
@@ -234,6 +250,31 @@ impl Default for ActionResult {
 
 pub struct Runtime {}
 
+
+pub static PART_ONE: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_one",
+        "",
+    )
+    .unwrap()
+});
+
+pub static PART_TWO: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_two",
+        "",
+    )
+    .unwrap()
+});
+
+pub static APPLY_ACTION: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_apply_act",
+        "",
+    )
+    .unwrap()
+});
+
 impl Runtime {
     pub fn new() -> Self {
         Self {}
@@ -269,10 +310,11 @@ impl Runtime {
         signed_transaction: &SignedTransaction,
         stats: &mut ApplyStats,
     ) -> Result<(Receipt, ExecutionOutcomeWithId), RuntimeError> {
+        
         let _span = tracing::debug_span!(target: "runtime", "process_transaction", tx_hash = %signed_transaction.get_hash()).entered();
         metrics::TRANSACTION_PROCESSED_TOTAL.inc();
 
-        match verify_and_charge_transaction(
+        let x = match verify_and_charge_transaction(
             &apply_state.config,
             state_update,
             apply_state.gas_price,
@@ -331,7 +373,9 @@ impl Runtime {
                 state_update.rollback();
                 Err(e)
             }
-        }
+        };
+        
+        x
     }
 
     fn apply_action(
@@ -403,7 +447,8 @@ impl Runtime {
                 )?;
             }
             Action::FunctionCall(function_call) => {
-                action_function_call(
+                let start=Instant::now();
+                let x = action_function_call(
                     state_update,
                     apply_state,
                     account.as_mut().expect(EXPECT_ACCOUNT_EXISTS),
@@ -417,7 +462,10 @@ impl Runtime {
                     &apply_state.config,
                     action_index + 1 == actions.len(),
                     epoch_info_provider,
-                )?;
+                );
+                let elapsed = start.elapsed().as_nanos() as u64;
+                ACTION_FN.inc_by(elapsed);
+                x?;
             }
             Action::Transfer(TransferAction { deposit }) => {
                 action_transfer_or_implicit_account_creation(
@@ -570,6 +618,7 @@ impl Runtime {
                 &apply_state.block_hash,
                 action_index,
             );
+            let start= Instant::now();
             let mut new_result = self.apply_action(
                 action,
                 state_update,
@@ -584,6 +633,8 @@ impl Runtime {
                 &action_receipt.actions,
                 epoch_info_provider,
             )?;
+            let elapsed = start.elapsed().as_nanos() as u64;
+            APPLY_ACTION.inc_by(elapsed);
             if new_result.result.is_ok() {
                 if let Err(e) = new_result.new_receipts.iter().try_for_each(|receipt| {
                     validate_receipt(
@@ -908,6 +959,7 @@ impl Runtime {
         stats: &mut ApplyStats,
         epoch_info_provider: &dyn EpochInfoProvider,
     ) -> Result<Option<ExecutionOutcomeWithId>, RuntimeError> {
+        let start=Instant::now();
         let account_id = &receipt.receiver_id;
         match receipt.receipt {
             ReceiptEnum::Data(ref data_receipt) => {
@@ -1050,6 +1102,8 @@ impl Runtime {
         // We didn't trigger execution, so we need to commit the state.
         state_update
             .commit(StateChangeCause::PostponedReceipt { receipt_hash: receipt.get_hash() });
+        let elapsed = start.elapsed().as_nanos() as u64;
+        PROCESS_RCPT.inc_by(elapsed);
         Ok(None)
     }
 
@@ -1247,6 +1301,7 @@ impl Runtime {
         // the check is not necessary.  It’s defence in depth to make sure any
         // future refactoring won’t break the condition.
         assert!(cfg!(feature = "sandbox") || state_patch.is_empty());
+        
 
         let _span = tracing::debug_span!(
             target: "runtime",
@@ -1436,6 +1491,10 @@ impl Runtime {
         }
         metrics.local_receipts_done(total_gas_burnt, total_compute_usage, time);
 
+        let elapsed = start.elapsed().as_nanos() as u64;
+        PART_ONE.inc_by(elapsed);
+        let start2 = Instant::now();
+
         let time = Instant::now();
         // Then we process the delayed receipts. It's a backlog of receipts from the past blocks.
         while delayed_receipts_indices.first_index < delayed_receipts_indices.next_available_index {
@@ -1481,6 +1540,8 @@ impl Runtime {
             processed_delayed_receipts.push(receipt);
         }
         metrics.delayed_receipts_done(total_gas_burnt, total_compute_usage, time);
+        let elapsed = start2.elapsed().as_nanos() as u64;
+        PART_TWO.inc_by(elapsed);
 
         // And then we process the new incoming receipts. These are receipts from other shards.
         let time = Instant::now();

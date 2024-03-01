@@ -846,7 +846,7 @@ impl RuntimeAdapter for NightshadeRuntime {
                             }
                             total_size += tx.get_size();
                             result.transactions.push(tx);
-                            break;
+                            //break;
                         }
                         Err(RuntimeError::InvalidTxError(err)) => {
                             tracing::trace!(target: "runtime", tx=?tx.get_hash(), ?err, "discarding transaction that is invalid");
