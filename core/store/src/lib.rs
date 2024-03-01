@@ -939,16 +939,15 @@ impl CompiledContractCache for StoreCompiledContractCache {
         }
     }
 
-    fn hack_put(
-        &self,
-        _key: &CryptoHash,
-        _value: near_vm_runner::VMArtifact,
-    ) -> std::io::Result<()> {
-        unimplemented!();
+    fn hack_put(&self, key: &CryptoHash, value: near_vm_runner::VMArtifact) -> std::io::Result<()> {
+        let mut lock = self.hack_cache.lock().unwrap();
+        lock.put(*key, value);
+        Ok(())
     }
 
-    fn hack_get(&self, _key: &CryptoHash) -> std::io::Result<Option<near_vm_runner::VMArtifact>> {
-        unimplemented!();
+    fn hack_get(&self, key: &CryptoHash) -> std::io::Result<Option<near_vm_runner::VMArtifact>> {
+        let mut lock = self.hack_cache.lock().unwrap();
+        Ok(lock.get(key).cloned())
     }
 
     fn has(&self, key: &CryptoHash) -> io::Result<bool> {
