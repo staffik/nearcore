@@ -20,8 +20,9 @@ pub use db::{
 use near_crypto::PublicKey;
 use near_fmt::{AbbrBytes, StorageKey};
 use near_o11y::metrics::{
-    exponential_buckets, try_create_histogram_with_buckets, try_create_int_counter_vec, Histogram,
-    IntCounterVec,
+    exponential_buckets, try_create_histogram_with_buckets, try_create_int_counter,
+    try_create_int_counter_vec, try_create_int_gauge, Histogram, IntCounter, IntCounterVec,
+    IntGauge,
 };
 use near_primitives::account::{AccessKey, Account};
 pub use near_primitives::errors::{MissingTrieValueContext, StorageError};
@@ -912,6 +913,15 @@ impl StoreCompiledContractCache {
     }
 }
 
+pub static CCCACHE_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| try_create_int_gauge("near_cccache_size", "near_cccache_size").unwrap());
+
+pub static CCCACHE_GETS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_gets", "near_cccache_gets").unwrap());
+
+pub static CCCACHE_PUTS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_puts", "near_cccache_puts").unwrap());
+
 /// Cache for compiled contracts code using Store for keeping data.
 /// We store contracts in VM-specific format in DBCol::CachedContractCode.
 /// Key must take into account VM being used and its configuration, so that
@@ -941,12 +951,16 @@ impl CompiledContractCache for StoreCompiledContractCache {
 
     fn hack_put(&self, key: &CryptoHash, value: near_vm_runner::VMArtifact) -> std::io::Result<()> {
         let mut lock = self.hack_cache.lock().unwrap();
+        CCCACHE_SIZE.set(lock.len() as i64);
+        CCCACHE_PUTS.inc();
         lock.put(*key, value);
         Ok(())
     }
 
     fn hack_get(&self, key: &CryptoHash) -> std::io::Result<Option<near_vm_runner::VMArtifact>> {
         let mut lock = self.hack_cache.lock().unwrap();
+        CCCACHE_SIZE.set(lock.len() as i64);
+        CCCACHE_GETS.inc();
         Ok(lock.get(key).cloned())
     }
 
