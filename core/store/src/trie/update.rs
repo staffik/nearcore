@@ -221,7 +221,7 @@ impl crate::TrieAccess for TrieUpdate {
                 }
                 CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
 
-                self.contract_codes.borrow().get(&code_hash)
+                Ok(self.contract_codes.borrow().get(&code_hash).cloned())
             }
         }
     }
