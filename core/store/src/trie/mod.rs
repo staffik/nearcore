@@ -370,8 +370,8 @@ pub trait TrieAccess {
         &self,
         key: &TrieKey,
         _code_hash: Option<CryptoHash>,
-    ) -> Result<Option<Vec<u8>>, StorageError> {
-        self.get(key)
+    ) -> Result<Option<Arc<[u8]>>, StorageError> {
+        self.get(key).map(|v| v.map(|v| v.into()))
     }
 
     /// Check if the key is present.

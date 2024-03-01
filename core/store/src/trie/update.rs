@@ -12,6 +12,7 @@ use near_primitives::types::{
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 mod iterator;
 
@@ -30,7 +31,7 @@ pub struct TrieUpdate {
     pub trie: Trie,
     committed: RawStateChanges,
     prospective: TrieUpdates,
-    contract_codes: RefCell<HashMap<CryptoHash, Vec<u8>>>,
+    contract_codes: RefCell<HashMap<CryptoHash, Arc<[u8]>>>,
 }
 
 pub enum TrieUpdateValuePtr<'a> {
@@ -203,7 +204,7 @@ impl crate::TrieAccess for TrieUpdate {
         &self,
         key: &TrieKey,
         code_hash: Option<CryptoHash>,
-    ) -> Result<Option<Vec<u8>>, StorageError> {
+    ) -> Result<Option<Arc<[u8]>>, StorageError> {
         match code_hash {
             None => self.get(key),
             Some(code_hash) => {
@@ -215,10 +216,11 @@ impl crate::TrieAccess for TrieUpdate {
 
                 let result = self.get(key);
                 if let Ok(Some(code)) = &result {
-                    CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
                     CCCACHE2_PUTS.inc();
-                    self.contract_codes.borrow_mut().insert(code_hash, code.clone());
+                    self.contract_codes.borrow_mut().insert(code_hash, code.into());
                 }
+                CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
+
                 result
             }
         }

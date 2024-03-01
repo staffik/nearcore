@@ -14,6 +14,13 @@ impl ContractCode {
         ContractCode { code: code.into(), hash }
     }
 
+    pub fn new_arc(code: Arc<[u8]>, hash: Option<CryptoHash>) -> ContractCode {
+        let hash = hash.unwrap_or_else(|| sha256(&code));
+        debug_assert_eq!(hash, sha256(&code));
+
+        ContractCode { code, hash }
+    }
+
     pub fn code(&self) -> &[u8] {
         self.code.as_ref()
     }
