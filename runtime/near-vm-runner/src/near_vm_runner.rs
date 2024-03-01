@@ -27,7 +27,7 @@ use near_vm_vm::{
 use std::borrow::Cow;
 use std::hash::Hash;
 use std::mem::size_of;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 #[derive(Clone)]
@@ -686,7 +686,6 @@ impl<'a> finite_wasm::wasmparser::VisitOperator<'a> for GasCostCfg {
     finite_wasm::wasmparser::for_each_operator!(gas_cost);
 }
 
-use near_primitives_core::hash::CryptoHash;
 use once_cell::sync::Lazy;
 
 pub static VMRUNNER_TIME: Lazy<IntCounter> = Lazy::new(|| {
