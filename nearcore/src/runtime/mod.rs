@@ -1,7 +1,6 @@
 use crate::metrics;
 use crate::migrations::load_migration_data;
 use crate::NearConfig;
-use tracing::debug;
 use borsh::BorshDeserialize;
 use errors::FromStateViewerErrors;
 use near_chain::types::{
@@ -59,6 +58,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use tracing::debug;
 use tracing::{error, info};
 
 pub mod errors;
@@ -494,7 +494,7 @@ impl NightshadeRuntime {
         .entered();
         let protocol_version = self.epoch_manager.get_epoch_protocol_version(epoch_id)?;
         let runtime_config = self.runtime_config_store.get_config(protocol_version);
-        let compiled_contract_cache: Option<Box<dyn CompiledContractCache>> =
+        let _compiled_contract_cache: Option<Box<dyn CompiledContractCache>> =
             Some(Box::new(StoreCompiledContractCache::new(&self.store)));
         // Execute precompile_contract in parallel but prevent it from using more than half of all
         // threads so that node will still function normally.
@@ -507,10 +507,10 @@ impl NightshadeRuntime {
             }
             for code in contract_codes {
                 slot_receiver.recv().expect("could not receive a slot to compile contract");
-                let contract_cache = compiled_contract_cache.as_deref();
+                // let contract_cache = compiled_contract_cache.as_deref();
                 let slot_sender = slot_sender.clone();
                 scope.spawn(move |_| {
-                    precompile_contract(&code, &runtime_config.wasm_config, contract_cache).ok();
+                    // precompile_contract(&code, &runtime_config.wasm_config, contract_cache).ok();
                     // If this fails, it just means there won't be any more attempts to recv the
                     // slots
                     let _ = slot_sender.send(());
@@ -790,7 +790,7 @@ impl RuntimeAdapter for NightshadeRuntime {
             / (runtime_config.wasm_config.ext_costs.gas_cost(ExtCosts::storage_write_value_byte)
                 + runtime_config.wasm_config.ext_costs.gas_cost(ExtCosts::storage_read_value_byte));
 
-        let mut tgcount=0;
+        let mut tgcount = 0;
         // Add new transactions to the result until some limit is hit or the transactions run out.
         loop {
             if total_gas_burnt >= transactions_gas_limit {
@@ -818,7 +818,7 @@ impl RuntimeAdapter for NightshadeRuntime {
             }
 
             if let Some(iter) = transaction_groups.next() {
-                tgcount+=1;
+                tgcount += 1;
                 while let Some(tx) = iter.next() {
                     num_checked_transactions += 1;
                     // Verifying the transaction is on the same chain and hasn't expired yet.
