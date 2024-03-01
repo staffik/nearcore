@@ -902,6 +902,7 @@ where
 
 pub struct StoreCompiledContractCache {
     db: Arc<dyn Database>,
+    #[allow(unused)]
     pub(crate) hack_cache: Mutex<lru::LruCache<CryptoHash, near_vm_runner::VMArtifact>>,
 }
 
