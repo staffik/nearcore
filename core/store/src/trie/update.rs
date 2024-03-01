@@ -2,12 +2,16 @@ pub use self::iterator::TrieUpdateIterator;
 use super::{OptimizedValueRef, Trie};
 use crate::trie::{KeyLookupMode, TrieChanges};
 use crate::StorageError;
+use near_o11y::metrics::{try_create_int_counter, try_create_int_gauge, IntCounter, IntGauge};
 use near_primitives::trie_key::TrieKey;
 use near_primitives::types::{
     RawStateChange, RawStateChanges, RawStateChangesWithTrieKey, StateChangeCause, StateRoot,
     TrieCacheMode,
 };
-use std::collections::BTreeMap;
+use near_vm_runner::ContractCode;
+use once_cell::sync::Lazy;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 mod iterator;
 
@@ -26,6 +30,7 @@ pub struct TrieUpdate {
     pub trie: Trie,
     committed: RawStateChanges,
     prospective: TrieUpdates,
+    contract_codes: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 pub enum TrieUpdateValuePtr<'a> {
@@ -49,9 +54,26 @@ impl<'a> TrieUpdateValuePtr<'a> {
     }
 }
 
+pub static CCCACHE2_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| try_create_int_gauge("near_cccache2_size", "near_cccache_size").unwrap());
+
+pub static CCCACHE2_GETS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_gets", "near_cccache_gets").unwrap());
+
+pub static CCCACHE2_PUTS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_puts", "near_cccache_puts").unwrap());
+
+pub static CCCACHE2_HITS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_hits", "near_cccache_hits").unwrap());
+
 impl TrieUpdate {
     pub fn new(trie: Trie) -> Self {
-        TrieUpdate { trie, committed: Default::default(), prospective: Default::default() }
+        TrieUpdate {
+            trie,
+            committed: Default::default(),
+            prospective: Default::default(),
+            contract_codes: RefCell::new(Default::default()),
+        }
     }
 
     pub fn trie(&self) -> &Trie {
@@ -93,6 +115,10 @@ impl TrieUpdate {
     }
 
     pub fn get(&self, key: &TrieKey) -> Result<Option<Vec<u8>>, StorageError> {
+        let is_code = match &key {
+            TrieKey::ContractCode { .. } => true,
+            _ => false,
+        };
         let key = key.to_vec();
         if let Some(key_value) = self.prospective.get(&key) {
             return Ok(key_value.value.as_ref().map(<Vec<u8>>::clone));
@@ -100,8 +126,23 @@ impl TrieUpdate {
             if let Some(RawStateChange { data, .. }) = changes_with_trie_key.changes.last() {
                 return Ok(data.as_ref().map(<Vec<u8>>::clone));
             }
+        } else if is_code {
+            CCCACHE2_GETS.inc();
+            if let Some(code) = self.contract_codes.borrow().get(&key) {
+                CCCACHE2_HITS.inc();
+                return Ok(Some(code.clone()));
+            }
         }
-        self.trie.get(&key)
+
+        let result = self.trie.get(&key);
+        if is_code {
+            if let Ok(Some(code)) = &result {
+                CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
+                CCCACHE2_PUTS.inc();
+                self.contract_codes.borrow_mut().insert(key, code.clone());
+            }
+        }
+        result
     }
 
     pub fn set(&mut self, trie_key: TrieKey, value: Vec<u8>) {
