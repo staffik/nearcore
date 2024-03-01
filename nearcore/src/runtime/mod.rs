@@ -45,7 +45,7 @@ use near_store::{
     StoreCompiledContractCache, Trie, TrieConfig, TrieUpdate, WrappedTrieChanges, COLD_HEAD_KEY,
 };
 use near_vm_runner::logic::CompiledContractCache;
-use near_vm_runner::precompile_contract;
+// use near_vm_runner::precompile_contract;
 use near_vm_runner::ContractCode;
 use node_runtime::adapter::ViewRuntimeAdapter;
 use node_runtime::state_viewer::TrieViewer;
@@ -493,7 +493,7 @@ impl NightshadeRuntime {
             num_contracts = contract_codes.len())
         .entered();
         let protocol_version = self.epoch_manager.get_epoch_protocol_version(epoch_id)?;
-        let runtime_config = self.runtime_config_store.get_config(protocol_version);
+        let _runtime_config = self.runtime_config_store.get_config(protocol_version);
         let _compiled_contract_cache: Option<Box<dyn CompiledContractCache>> =
             Some(Box::new(StoreCompiledContractCache::new(&self.store)));
         // Execute precompile_contract in parallel but prevent it from using more than half of all
@@ -505,7 +505,7 @@ impl NightshadeRuntime {
             for _ in 0..max_threads {
                 slot_sender.send(()).expect("both sender and receiver are owned here");
             }
-            for code in contract_codes {
+            for _code in contract_codes {
                 slot_receiver.recv().expect("could not receive a slot to compile contract");
                 // let contract_cache = compiled_contract_cache.as_deref();
                 let slot_sender = slot_sender.clone();
