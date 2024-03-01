@@ -16,6 +16,7 @@ pub mod types;
 mod utils;
 mod vmstate;
 
+use crate::near_vm_runner::VMArtifact;
 pub use context::VMContext;
 pub use dependencies::{External, MemSlice, MemoryLike, TrieNodesCount, ValuePtr};
 pub use errors::{HostError, VMLogicError};
@@ -35,6 +36,12 @@ pub enum CompiledContract {
 pub trait CompiledContractCache: Send + Sync {
     fn put(&self, key: &CryptoHash, value: CompiledContract) -> std::io::Result<()>;
     fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContract>>;
+    fn hack_put(&self, _key: &CryptoHash, _value: VMArtifact) -> std::io::Result<()> {
+        unimplemented!();
+    }
+    fn hack_get(&self, _key: &CryptoHash) -> std::io::Result<Option<VMArtifact>> {
+        unimplemented!();
+    }
     fn has(&self, key: &CryptoHash) -> std::io::Result<bool> {
         self.get(key).map(|entry| entry.is_some())
     }

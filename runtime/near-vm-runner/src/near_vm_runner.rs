@@ -25,10 +25,9 @@ use near_vm_vm::{
     Artifact, Instantiatable, LinearMemory, LinearTable, Memory, MemoryStyle, TrapCode, VMMemory,
 };
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::hash::Hash;
 use std::mem::size_of;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
 #[derive(Clone)]
@@ -229,7 +228,7 @@ pub(crate) fn near_vm_vm_hash() -> u64 {
     VM_CONFIG.config_hash()
 }
 
-pub(crate) type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
+pub type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
 
 pub static VMLOGIC_LOAD_ARTIFACT_TIME: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter("near_vm_logic_load_artifact_time", "near_vm_logic_load_artifact_time")
@@ -247,7 +246,6 @@ pub static VMLOGIC_COMPILE_AND_CACHE_TIME: Lazy<IntCounter> = Lazy::new(|| {
 pub(crate) struct NearVM {
     pub(crate) config: Config,
     pub(crate) engine: UniversalEngine,
-    pub(crate) hack_cache: RefCell<lru::LruCache<CryptoHash, VMArtifact>>,
 }
 
 impl NearVM {
@@ -290,7 +288,6 @@ impl NearVM {
                 .features(features.into())
                 .code_memory_pool(code_memory_pool)
                 .engine(),
-            hack_cache: lru::LruCache::new(100),
         }
     }
 
@@ -375,9 +372,10 @@ impl NearVM {
         // outcome). And `cache`, being a database, can fail with an `io::Error`.
         let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_load").entered();
         let key = get_contract_cache_key(code, &self.config);
-        if let Some(entry) = self.hack_cache.borrow_mut().get(&key).cloned() {
-            return Ok(Ok(entry));
-        }
+        // let mut lock = self.hack_cache.lock().unwrap();
+        // if let Some(entry) = self.hack_cache.().get(&key).cloned() {
+        //     return Ok(Ok(entry));
+        // }
         let cache_record = cache
             .map(|cache| cache.get(&key))
             .transpose()
@@ -426,9 +424,9 @@ impl NearVM {
                     .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
                 Err(err) => Err(err),
             };
-            if let Ok(Ok(v)) = result {
-                self.hack_cache.borrow_mut().put(key, v);
-            }
+            // if let Ok(Ok(v)) = result {
+            //     self.hack_cache.borrow_mut().put(key, v);
+            // }
             result
         })
     }
