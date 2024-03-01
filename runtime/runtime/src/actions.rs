@@ -191,7 +191,7 @@ use once_cell::sync::Lazy;
 pub static EXEC_FN: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_exec_fn",
-        "",
+        "Total execute function call time",
     )
     .unwrap()
 });

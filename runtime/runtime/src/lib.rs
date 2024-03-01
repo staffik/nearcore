@@ -185,7 +185,7 @@ pub static RUNTIME_APPLY_TIME: Lazy<IntCounter> = Lazy::new(|| {
 pub static ACTION_FN: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_action_fn",
-        "",
+        "Total function call time",
     )
     .unwrap()
 });
@@ -193,7 +193,7 @@ pub static ACTION_FN: Lazy<IntCounter> = Lazy::new(|| {
 pub static PROCESS_RCPT: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_process_rcpt",
-        "",
+        "Total process receipt time",
     )
     .unwrap()
 });
@@ -254,7 +254,7 @@ pub struct Runtime {}
 pub static PART_ONE: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_part_one",
-        "",
+        "apply part one time",
     )
     .unwrap()
 });
@@ -262,7 +262,7 @@ pub static PART_ONE: Lazy<IntCounter> = Lazy::new(|| {
 pub static PART_TWO: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_part_two",
-        "",
+        "apply part two time",
     )
     .unwrap()
 });
@@ -270,7 +270,7 @@ pub static PART_TWO: Lazy<IntCounter> = Lazy::new(|| {
 pub static APPLY_ACTION: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_apply_act",
-        "",
+        "Total apply action time",
     )
     .unwrap()
 });
