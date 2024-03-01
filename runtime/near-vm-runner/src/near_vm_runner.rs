@@ -25,6 +25,7 @@ use near_vm_vm::{
     Artifact, Instantiatable, LinearMemory, LinearTable, Memory, MemoryStyle, TrapCode, VMMemory,
 };
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::{Arc, OnceLock};
@@ -246,6 +247,7 @@ pub static VMLOGIC_COMPILE_AND_CACHE_TIME: Lazy<IntCounter> = Lazy::new(|| {
 pub(crate) struct NearVM {
     pub(crate) config: Config,
     pub(crate) engine: UniversalEngine,
+    pub(crate) hack_cache: RefCell<lru::LruCache<CryptoHash, VMArtifact>>,
 }
 
 impl NearVM {
@@ -288,6 +290,7 @@ impl NearVM {
                 .features(features.into())
                 .code_memory_pool(code_memory_pool)
                 .engine(),
+            hack_cache: lru::LruCache::new(100),
         }
     }
 
@@ -372,6 +375,9 @@ impl NearVM {
         // outcome). And `cache`, being a database, can fail with an `io::Error`.
         let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_load").entered();
         let key = get_contract_cache_key(code, &self.config);
+        if let Some(entry) = self.hack_cache.borrow_mut().get(&key).cloned() {
+            return Ok(Ok(entry));
+        }
         let cache_record = cache
             .map(|cache| cache.get(&key))
             .transpose()
@@ -412,14 +418,18 @@ impl NearVM {
         Ok(if let Some(it) = stored_artifact {
             Ok(it)
         } else {
-            match self.compile_and_cache(code, cache)? {
+            let result = match self.compile_and_cache(code, cache)? {
                 Ok(executable) => Ok(self
                     .engine
                     .load_universal_executable(&executable)
                     .map(Arc::new)
                     .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
                 Err(err) => Err(err),
+            };
+            if let Ok(Ok(v)) = result {
+                self.hack_cache.borrow_mut().put(key, v);
             }
+            result
         })
     }
 
@@ -678,6 +688,7 @@ impl<'a> finite_wasm::wasmparser::VisitOperator<'a> for GasCostCfg {
     finite_wasm::wasmparser::for_each_operator!(gas_cost);
 }
 
+use near_primitives_core::hash::CryptoHash;
 use once_cell::sync::Lazy;
 
 pub static VMRUNNER_TIME: Lazy<IntCounter> = Lazy::new(|| {
