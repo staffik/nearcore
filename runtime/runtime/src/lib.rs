@@ -275,6 +275,22 @@ pub static PART_3: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static PART_4: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_4",
+        "apply part 4 time",
+    )
+    .unwrap()
+});
+
+pub static PART_5: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_5",
+        "apply part 5 time",
+    )
+    .unwrap()
+});
+
 pub static APPLY_ACTION: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_apply_act",
@@ -1581,7 +1597,7 @@ impl Runtime {
         let elapsed = time.elapsed().as_nanos() as u64;
         PART_3.inc_by(elapsed);
         metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage, time);
-
+        let time = Instant::now();
         // No more receipts are executed on this trie, stop any pending prefetches on it.
         if let Some(prefetcher) = &prefetcher {
             prefetcher.clear();
@@ -1600,10 +1616,16 @@ impl Runtime {
             &outgoing_receipts,
             &stats,
         )?;
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_4.inc_by(elapsed);
+        let time = Instant::now();
 
         state_update.commit(StateChangeCause::UpdatedDelayedReceipts);
         self.apply_state_patch(&mut state_update, state_patch);
         let (trie, trie_changes, state_changes) = state_update.finalize()?;
+
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_5.inc_by(elapsed);
 
         // Dedup proposals from the same account.
         // The order is deterministically changed.
