@@ -413,6 +413,9 @@ impl NearVM {
         VMLOGIC_LOAD_ARTIFACT_TIME.inc_by(elapsed);
 
         Ok(if let Some(it) = stored_artifact {
+            if let Some(cache) = cache {
+                cache.hack_put(&key, it.clone()).unwrap();
+            }
             Ok(it)
         } else {
             let result = match self.compile_and_cache(code, cache)? {

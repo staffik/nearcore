@@ -922,6 +922,9 @@ pub static CCCACHE_GETS: Lazy<IntCounter> =
 pub static CCCACHE_PUTS: Lazy<IntCounter> =
     Lazy::new(|| try_create_int_counter("near_cccache_puts", "near_cccache_puts").unwrap());
 
+pub static CCCACHE_HITS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_hits", "near_cccache_hits").unwrap());
+
 /// Cache for compiled contracts code using Store for keeping data.
 /// We store contracts in VM-specific format in DBCol::CachedContractCode.
 /// Key must take into account VM being used and its configuration, so that
@@ -961,7 +964,11 @@ impl CompiledContractCache for StoreCompiledContractCache {
         let mut lock = self.hack_cache.lock().unwrap();
         CCCACHE_SIZE.set(lock.len() as i64);
         CCCACHE_GETS.inc();
-        Ok(lock.get(key).cloned())
+        let result = lock.get(key).cloned();
+        if result.is_some() {
+            CCCACHE_HITS.inc();
+        }
+        Ok(result)
     }
 
     fn has(&self, key: &CryptoHash) -> io::Result<bool> {
