@@ -723,13 +723,12 @@ impl crate::runner::VM for NearVM {
         promise_results: &[PromiseResult],
         cache: Option<&dyn CompiledContractCache>,
     ) -> Result<VMOutcome, VMRunnerError> {
+        let init_start = Instant::now();
         let mut memory = NearVmMemory::new(
             self.config.limit_config.initial_memory_pages,
             self.config.limit_config.max_memory_pages,
         )
         .expect("Cannot create memory for a contract call");
-
-        let init_start = Instant::now();
 
         // FIXME: this mostly duplicates the `run_module` method.
         // Note that we don't clone the actual backing memory, just increase the RC.
