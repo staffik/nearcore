@@ -267,6 +267,14 @@ pub static PART_TWO: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static PART_3: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_3",
+        "apply part three time",
+    )
+    .unwrap()
+});
+
 pub static APPLY_ACTION: Lazy<IntCounter> = Lazy::new(|| {
     try_create_int_counter(
         "near_apply_act",
@@ -1570,6 +1578,8 @@ impl Runtime {
                 set_delayed_receipt(&mut state_update, &mut delayed_receipts_indices, receipt);
             }
         }
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_3.inc_by(elapsed);
         metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage, time);
 
         // No more receipts are executed on this trie, stop any pending prefetches on it.
