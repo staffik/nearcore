@@ -63,7 +63,28 @@ fn get_contract_code(
     }
     runtime_ext.get_code(code_hash).map(|option| option.map(Arc::new))
 }
+pub static EXEC_FN_1: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_exec_fn_1",
+        "Execute function part 1",
+    )
+    .unwrap()
+});
+pub static EXEC_FN_2: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_exec_fn_2",
+        "Execute function part 2",
+    )
+    .unwrap()
+});
 
+pub static VMRUN: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vmrun",
+        "VM run total time",
+    )
+    .unwrap()
+});
 /// Runs given function call with given context / apply state.
 pub(crate) fn execute_function_call(
     apply_state: &ApplyState,
@@ -78,6 +99,7 @@ pub(crate) fn execute_function_call(
     is_last_action: bool,
     view_config: Option<ViewConfig>,
 ) -> Result<VMOutcome, RuntimeError> {
+    let start = Instant::now();
     let account_id = runtime_ext.account_id();
     tracing::debug!(target: "runtime", %account_id, "Calling the contract");
     let code = match get_contract_code(&runtime_ext, account, apply_state.current_protocol_version)
@@ -93,6 +115,9 @@ pub(crate) fn execute_function_call(
             return Err(RuntimeError::StorageError(e));
         }
     };
+    let elapsed = start.elapsed().as_nanos() as u64;
+    EXEC_FN_1.inc_by(elapsed);
+    let start2 = Instant::now();
     // Output data receipts are ignored if the function call is not the last action in the batch.
     let output_data_receivers: Vec<_> = if is_last_action {
         action_receipt.output_data_receivers.iter().map(|r| r.receiver_id.clone()).collect()
@@ -132,6 +157,10 @@ pub(crate) fn execute_function_call(
     if checked_feature!("stable", ChunkNodesCache, protocol_version) {
         runtime_ext.set_trie_cache_mode(TrieCacheMode::CachingChunk);
     }
+    let elapsed = start2.elapsed().as_nanos() as u64;
+    EXEC_FN_2.inc_by(elapsed);
+    let start3=Instant::now();
+
     let result = near_vm_runner::run(
         &code,
         &function_call.method_name,
@@ -142,6 +171,8 @@ pub(crate) fn execute_function_call(
         promise_results,
         apply_state.cache.as_deref(),
     );
+    let elapsed = start3.elapsed().as_nanos() as u64;
+    VMRUN.inc_by(elapsed);
 
     if checked_feature!("stable", ChunkNodesCache, protocol_version) {
         runtime_ext.set_trie_cache_mode(TrieCacheMode::CachingShard);
