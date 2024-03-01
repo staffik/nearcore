@@ -114,14 +114,6 @@ impl TrieUpdate {
         self.trie.contains_key(&key)
     }
 
-    pub fn get_code(
-        &self,
-        key: &TrieKey,
-        code_hash: Option<CryptoHash>,
-    ) -> Result<Option<Vec<u8>>, StorageError> {
-        self.get(key)
-    }
-
     pub fn get(&self, key: &TrieKey) -> Result<Option<Vec<u8>>, StorageError> {
         let key = key.to_vec();
         if let Some(key_value) = self.prospective.get(&key) {
