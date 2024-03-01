@@ -215,13 +215,13 @@ impl crate::TrieAccess for TrieUpdate {
                 }
 
                 let result = self.get(key);
-                if let Ok(Some(code)) = &result {
+                if let Ok(Some(code)) = result {
                     CCCACHE2_PUTS.inc();
                     self.contract_codes.borrow_mut().insert(code_hash, code.into());
                 }
                 CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
 
-                result
+                self.contract_codes.borrow().get(&code_hash)
             }
         }
     }
