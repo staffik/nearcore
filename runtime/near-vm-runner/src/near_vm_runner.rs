@@ -423,7 +423,7 @@ impl NearVM {
                     .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
                 Err(err) => Err(err),
             };
-            if let Ok(Ok(v)) = result {
+            if let Ok(v) = &result {
                 if let Some(cache) = cache {
                     cache.hack_put(&key, v.clone()).unwrap();
                 }
