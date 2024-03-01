@@ -230,6 +230,19 @@ pub(crate) fn near_vm_vm_hash() -> u64 {
 
 pub(crate) type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
 
+pub static VMLOGIC_LOAD_ARTIFACT_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_logic_load_artifact_time", "near_vm_logic_load_artifact_time")
+        .unwrap()
+});
+
+pub static VMLOGIC_COMPILE_AND_CACHE_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_logic_compile_and_cache_time",
+        "near_vm_logic_compile_and_cache_time",
+    )
+    .unwrap()
+});
+
 pub(crate) struct NearVM {
     pub(crate) config: Config,
     pub(crate) engine: UniversalEngine,
@@ -324,6 +337,8 @@ impl NearVM {
         code: &ContractCode,
         cache: Option<&dyn CompiledContractCache>,
     ) -> Result<Result<UniversalExecutable, CompilationError>, CacheError> {
+        let start = Instant::now();
+        let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_cache").entered();
         let executable_or_error = self.compile_uncached(code);
         let key = get_contract_cache_key(code, &self.config);
 
@@ -339,6 +354,8 @@ impl NearVM {
             };
             cache.put(&key, record).map_err(CacheError::WriteError)?;
         }
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_COMPILE_AND_CACHE_TIME.inc_by(elapsed);
 
         Ok(executable_or_error)
     }
@@ -353,7 +370,7 @@ impl NearVM {
         // Caches also cache _compilation_ errors, so that we don't have to
         // re-parse invalid code (invalid code, in a sense, is a normal
         // outcome). And `cache`, being a database, can fail with an `io::Error`.
-        let _span = tracing::debug_span!(target: "vm", "NearVM::compile_and_load").entered();
+        let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_load").entered();
         let key = get_contract_cache_key(code, &self.config);
         let cache_record = cache
             .map(|cache| cache.get(&key))
@@ -361,11 +378,13 @@ impl NearVM {
             .map_err(CacheError::ReadError)?
             .flatten();
 
+        let start = Instant::now();
         let stored_artifact: Option<VMArtifact> = match cache_record {
             None => None,
             Some(CompiledContract::CompileModuleError(err)) => return Ok(Err(err)),
             Some(CompiledContract::Code(serialized_module)) => {
-                let _span = tracing::debug_span!(target: "vm", "NearVM::read_from_cache").entered();
+                let _span =
+                    tracing::debug_span!(target: "runtime", "NearVM::read_from_cache").entered();
                 unsafe {
                     // (UN-)SAFETY: the `serialized_module` must have been produced by a prior call to
                     // `serialize`.
@@ -387,6 +406,8 @@ impl NearVM {
                 }
             }
         };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_LOAD_ARTIFACT_TIME.inc_by(elapsed);
 
         Ok(if let Some(it) = stored_artifact {
             Ok(it)
