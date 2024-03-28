@@ -3,7 +3,7 @@ extern crate core;
 use std::fs::File;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{fmt, io};
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -19,6 +19,11 @@ pub use db::{
 };
 use near_crypto::PublicKey;
 use near_fmt::{AbbrBytes, StorageKey};
+use near_o11y::metrics::{
+    exponential_buckets, try_create_histogram_with_buckets, try_create_int_counter,
+    try_create_int_counter_vec, try_create_int_gauge, Histogram, IntCounter, IntCounterVec,
+    IntGauge,
+};
 use near_primitives::account::{AccessKey, Account};
 pub use near_primitives::errors::{MissingTrieValueContext, StorageError};
 use near_primitives::hash::CryptoHash;
@@ -644,6 +649,10 @@ impl fmt::Debug for StoreUpdate {
     }
 }
 
+pub static NEAR_GET_TRIE_KEYS: Lazy<IntCounterVec> = Lazy::new(|| {
+    try_create_int_counter_vec("near_get_trie_keys", "near_get_trie_keys", &["prefix"]).unwrap()
+});
+
 /// Reads an object from Trie.
 /// # Errors
 /// see StorageError
@@ -651,6 +660,8 @@ pub fn get<T: BorshDeserialize>(
     trie: &dyn TrieAccess,
     key: &TrieKey,
 ) -> Result<Option<T>, StorageError> {
+    let p = key.to_vec()[0];
+    NEAR_GET_TRIE_KEYS.with_label_values(&[&p.to_string()]).inc();
     match trie.get(key)? {
         None => Ok(None),
         Some(data) => match T::try_from_slice(&data) {
@@ -662,9 +673,21 @@ pub fn get<T: BorshDeserialize>(
     }
 }
 
+pub(crate) static NEAR_DELAYED_RECEIPT_SIZE: Lazy<Histogram> = Lazy::new(|| {
+    try_create_histogram_with_buckets(
+        "near_delayed_receipt_size",
+        "near_delayed_receipt_size",
+        exponential_buckets(1.0, 1.6, 30).unwrap(),
+    )
+    .unwrap()
+});
+
 /// Writes an object into Trie.
 pub fn set<T: BorshSerialize>(state_update: &mut TrieUpdate, key: TrieKey, value: &T) {
     let data = borsh::to_vec(&value).expect("Borsh serializer is not expected to ever fail");
+    if let TrieKey::DelayedReceipt { .. } = &key {
+        NEAR_DELAYED_RECEIPT_SIZE.observe(data.len() as f64);
+    }
     state_update.set(key, data);
 }
 
@@ -800,7 +823,7 @@ pub fn get_code(
     code_hash: Option<CryptoHash>,
 ) -> Result<Option<ContractCode>, StorageError> {
     let key = TrieKey::ContractCode { account_id: account_id.clone() };
-    trie.get(&key).map(|opt| opt.map(|code| ContractCode::new(code, code_hash)))
+    trie.get_code(&key, code_hash).map(|opt| opt.map(|code| ContractCode::new_arc(code, code_hash)))
 }
 
 /// Removes account, code and all access keys associated to it.
@@ -880,13 +903,27 @@ where
 
 pub struct StoreCompiledContractCache {
     db: Arc<dyn Database>,
+    #[allow(unused)]
+    pub(crate) hack_cache: Mutex<lru::LruCache<CryptoHash, near_vm_runner::VMArtifact>>,
 }
 
 impl StoreCompiledContractCache {
     pub fn new(store: &Store) -> Self {
-        Self { db: store.storage.clone() }
+        Self { db: store.storage.clone(), hack_cache: Mutex::new(lru::LruCache::new(100)) }
     }
 }
+
+pub static CCCACHE_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| try_create_int_gauge("near_cccache_size", "near_cccache_size").unwrap());
+
+pub static CCCACHE_GETS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_gets", "near_cccache_gets").unwrap());
+
+pub static CCCACHE_PUTS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_puts", "near_cccache_puts").unwrap());
+
+pub static CCCACHE_HITS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache_hits", "near_cccache_hits").unwrap());
 
 /// Cache for compiled contracts code using Store for keeping data.
 /// We store contracts in VM-specific format in DBCol::CachedContractCode.
@@ -913,6 +950,25 @@ impl CompiledContractCache for StoreCompiledContractCache {
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
+    }
+
+    fn hack_put(&self, key: &CryptoHash, value: near_vm_runner::VMArtifact) -> std::io::Result<()> {
+        let mut lock = self.hack_cache.lock().unwrap();
+        CCCACHE_SIZE.set(lock.len() as i64);
+        CCCACHE_PUTS.inc();
+        lock.put(*key, value);
+        Ok(())
+    }
+
+    fn hack_get(&self, key: &CryptoHash) -> std::io::Result<Option<near_vm_runner::VMArtifact>> {
+        let mut lock = self.hack_cache.lock().unwrap();
+        CCCACHE_SIZE.set(lock.len() as i64);
+        CCCACHE_GETS.inc();
+        let result = lock.get(key).cloned();
+        if result.is_some() {
+            CCCACHE_HITS.inc();
+        }
+        Ok(result)
     }
 
     fn has(&self, key: &CryptoHash) -> io::Result<bool> {

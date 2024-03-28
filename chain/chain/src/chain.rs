@@ -25,7 +25,7 @@ use crate::update_shard::{
     process_shard_update, ReshardingData, ShardUpdateReason, ShardUpdateResult,
 };
 use crate::validate::{
-    validate_challenge, validate_chunk_proofs, validate_chunk_with_chunk_extra,
+    validate_challenge, validate_chunk_proofs, validate_chunk_with_chunk_extra, validate_transactions_order,
 
 };
 use crate::{
@@ -2865,15 +2865,15 @@ impl Chain {
         prev_block_header: &BlockHeader,
         chunk: &ShardChunk,
     ) -> Result<(), Error> {
-        // if !validate_transactions_order(chunk.transactions()) {
-        //     let merkle_paths = Block::compute_chunk_headers_root(block.chunks().iter()).1;
-        //     let chunk_proof = ChunkProofs {
-        //         block_header: borsh::to_vec(&block.header()).expect("Failed to serialize"),
-        //         merkle_proof: merkle_paths[chunk.shard_id() as usize].clone(),
-        //         chunk: MaybeEncodedShardChunk::Decoded(chunk.clone()).into(),
-        //     };
-        //     return Err(Error::InvalidChunkProofs(Box::new(chunk_proof)));
-        // }
+        if !validate_transactions_order(chunk.transactions()) {
+            let merkle_paths = Block::compute_chunk_headers_root(block.chunks().iter()).1;
+            let chunk_proof = ChunkProofs {
+                block_header: borsh::to_vec(&block.header()).expect("Failed to serialize"),
+                merkle_proof: merkle_paths[chunk.shard_id() as usize].clone(),
+                chunk: MaybeEncodedShardChunk::Decoded(chunk.clone()).into(),
+            };
+            return Err(Error::InvalidChunkProofs(Box::new(chunk_proof)));
+        }
 
         let protocol_version =
             self.epoch_manager.get_epoch_protocol_version(block.header().epoch_id())?;

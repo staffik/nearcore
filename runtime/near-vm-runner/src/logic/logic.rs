@@ -8,6 +8,7 @@ use super::ValuePtr;
 use super::{HostError, VMLogicError};
 use crate::ProfileDataV3;
 use near_crypto::Secp256K1Signature;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
 use near_parameters::vm::{Config, StorageGetMode};
 use near_parameters::{
     transfer_exec_fee, transfer_send_fee, ActionCosts, ExtCosts, RuntimeFeesConfig,
@@ -26,6 +27,8 @@ fn base64(s: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(s)
 }
+
+use std::time::Instant;
 
 pub struct VMLogic<'a> {
     /// Provides access to the components outside the Wasm runtime for operations on the trie and
@@ -123,6 +126,16 @@ impl PublicKeyBuffer {
         self.0.map_err(|_| HostError::InvalidPublicKey.into())
     }
 }
+
+use once_cell::sync::Lazy;
+
+pub static VMLOGIC_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_logic_storage_time",
+        "Total time used for storage operations by VM Logic",
+    )
+    .unwrap()
+});
 
 impl<'a> VMLogic<'a> {
     pub fn new(
@@ -2308,6 +2321,7 @@ impl<'a> VMLogic<'a> {
     /// cost of reading buffer from register or memory,
     /// `utf8_decoding_base + utf8_decoding_byte * num_bytes`.
     fn read_and_parse_account_id(&mut self, ptr: u64, len: u64) -> Result<AccountId> {
+        let start = Instant::now();
         let buf = get_memory_or_register!(self, ptr, len)?;
         self.gas_counter.pay_base(utf8_decoding_base)?;
         self.gas_counter.pay_per(utf8_decoding_byte, buf.len() as u64)?;
@@ -2322,6 +2336,8 @@ impl<'a> VMLogic<'a> {
                 AccountId::new_unvalidated,
             )
             .map_err(|_| HostError::BadUTF8)?;
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_TIME.inc_by(elapsed);
         Ok(account_id)
     }
 
@@ -2354,6 +2370,7 @@ impl<'a> VMLogic<'a> {
         value_ptr: u64,
         register_id: u64,
     ) -> Result<u64> {
+        let start = Instant::now();
         self.gas_counter.pay_base(base)?;
         if self.context.is_view() {
             return Err(
@@ -2405,7 +2422,7 @@ impl<'a> VMLogic<'a> {
         self.gas_counter.add_trie_fees(&nodes_delta)?;
         self.ext.storage_set(&key, &value)?;
         let storage_config = &self.fees_config.storage_usage_config;
-        match evicted {
+        let res = match evicted {
             Some(old_value) => {
                 // Inner value can't overflow, because the value length is limited.
                 self.current_storage_usage = self
@@ -2437,7 +2454,10 @@ impl<'a> VMLogic<'a> {
                     .ok_or(InconsistentStateError::IntegerOverflow)?;
                 Ok(0)
             }
-        }
+        };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_TIME.inc_by(elapsed);
+        res
     }
 
     fn deref_value<'s>(
@@ -2472,6 +2492,7 @@ impl<'a> VMLogic<'a> {
     /// `base + storage_read_base + storage_read_key_byte * num_key_bytes + storage_read_value_byte + num_value_bytes
     ///  cost to read key from register + cost to write value into register`.
     pub fn storage_read(&mut self, key_len: u64, key_ptr: u64, register_id: u64) -> Result<u64> {
+        let start = Instant::now();
         self.gas_counter.pay_base(base)?;
         self.gas_counter.pay_base(storage_read_base)?;
         let key = get_memory_or_register!(self, key_ptr, key_len)?;
@@ -2503,7 +2524,7 @@ impl<'a> VMLogic<'a> {
             tn_mem_reads = nodes_delta.mem_reads,
         );
 
-        match read {
+        let res = match read {
             Some(value) => {
                 self.registers.set(
                     &mut self.gas_counter,
@@ -2514,7 +2535,10 @@ impl<'a> VMLogic<'a> {
                 Ok(1)
             }
             None => Ok(0),
-        }
+        };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_TIME.inc_by(elapsed);
+        res
     }
 
     /// Removes the value stored under the given key.
@@ -2537,6 +2561,7 @@ impl<'a> VMLogic<'a> {
     /// `base + storage_remove_base + storage_remove_key_byte * num_key_bytes + storage_remove_ret_value_byte * num_value_bytes
     /// + cost to read the key + cost to write the value`.
     pub fn storage_remove(&mut self, key_len: u64, key_ptr: u64, register_id: u64) -> Result<u64> {
+        let start = Instant::now();
         self.gas_counter.pay_base(base)?;
         if self.context.is_view() {
             return Err(
@@ -2579,7 +2604,7 @@ impl<'a> VMLogic<'a> {
 
         self.gas_counter.add_trie_fees(&nodes_delta)?;
         let storage_config = &self.fees_config.storage_usage_config;
-        match removed {
+        let res  = match removed {
             Some(value) => {
                 // Inner value can't overflow, because the key/value length is limited.
                 self.current_storage_usage = self
@@ -2599,7 +2624,10 @@ impl<'a> VMLogic<'a> {
                 Ok(1)
             }
             None => Ok(0),
-        }
+        };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_TIME.inc_by(elapsed);
+        res
     }
 
     /// Checks if there is a key-value pair.
@@ -2615,6 +2643,7 @@ impl<'a> VMLogic<'a> {
     ///
     /// `base + storage_has_key_base + storage_has_key_byte * num_bytes + cost of reading key`
     pub fn storage_has_key(&mut self, key_len: u64, key_ptr: u64) -> Result<u64> {
+        let start = Instant::now();
         self.gas_counter.pay_base(base)?;
         self.gas_counter.pay_base(storage_has_key_base)?;
         let key = get_memory_or_register!(self, key_ptr, key_len)?;
@@ -2644,6 +2673,8 @@ impl<'a> VMLogic<'a> {
         );
 
         self.gas_counter.add_trie_fees(&nodes_delta)?;
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_TIME.inc_by(elapsed);
         Ok(res? as u64)
     }
 

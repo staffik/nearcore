@@ -13,6 +13,7 @@ from configured_logger import new_logger
 from locust import between, task
 from common.base import NearUser
 from common.ft import TransferFT
+from datetime import datetime, timedelta
 
 logger = new_logger(level=logging.WARN)
 
@@ -26,12 +27,17 @@ class FTTransferUser(NearUser):
 
     @task
     def ft_transfer(self):
+        current_time = datetime.now()
+        difference = current_time - self.start_time
+        if difference < timedelta(minutes=5):
+            return
         receiver = self.ft.random_receiver(self.account_id)
         tx = TransferFT(self.ft.account, self.account, receiver, how_much=1)
         self.send_tx(tx, locust_name="FT transfer")
 
     def on_start(self):
         super().on_start()
+        self.start_time = datetime.now()
         self.ft = random.choice(self.environment.ft_contracts)
         self.ft.register_user(self)
         logger.debug(

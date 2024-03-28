@@ -281,6 +281,7 @@ class NearNodeProxy:
                         "broadcast_tx_commit_fast",
                         [base64.b64encode(signed_tx).decode('utf8')])
                 else:
+                    logger.debug(f"NAME: {locust_name}")
                     result = self.post_json(
                         "broadcast_tx_commit",
                         [base64.b64encode(signed_tx).decode('utf8')])

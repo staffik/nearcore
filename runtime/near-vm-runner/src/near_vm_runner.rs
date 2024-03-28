@@ -13,6 +13,7 @@ use crate::prepare;
 use crate::runner::VMResult;
 use crate::{get_contract_cache_key, imports, ContractCode};
 use memoffset::offset_of;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
 use near_parameters::vm::VMKind;
 use near_parameters::RuntimeFeesConfig;
 use near_vm_compiler_singlepass::Singlepass;
@@ -27,6 +28,7 @@ use std::borrow::Cow;
 use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct NearVmMemory(Arc<LinearMemory>);
@@ -226,7 +228,20 @@ pub(crate) fn near_vm_vm_hash() -> u64 {
     VM_CONFIG.config_hash()
 }
 
-pub(crate) type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
+pub type VMArtifact = Arc<near_vm_engine::universal::UniversalArtifact>;
+
+pub static VMLOGIC_LOAD_ARTIFACT_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_logic_load_artifact_time", "near_vm_logic_load_artifact_time")
+        .unwrap()
+});
+
+pub static VMLOGIC_COMPILE_AND_CACHE_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_logic_compile_and_cache_time",
+        "near_vm_logic_compile_and_cache_time",
+    )
+    .unwrap()
+});
 
 pub(crate) struct NearVM {
     pub(crate) config: Config,
@@ -322,6 +337,8 @@ impl NearVM {
         code: &ContractCode,
         cache: Option<&dyn CompiledContractCache>,
     ) -> Result<Result<UniversalExecutable, CompilationError>, CacheError> {
+        let start = Instant::now();
+        let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_cache").entered();
         let executable_or_error = self.compile_uncached(code);
         let key = get_contract_cache_key(code, &self.config);
 
@@ -337,6 +354,8 @@ impl NearVM {
             };
             cache.put(&key, record).map_err(CacheError::WriteError)?;
         }
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_COMPILE_AND_CACHE_TIME.inc_by(elapsed);
 
         Ok(executable_or_error)
     }
@@ -351,19 +370,24 @@ impl NearVM {
         // Caches also cache _compilation_ errors, so that we don't have to
         // re-parse invalid code (invalid code, in a sense, is a normal
         // outcome). And `cache`, being a database, can fail with an `io::Error`.
-        let _span = tracing::debug_span!(target: "vm", "NearVM::compile_and_load").entered();
+        let _span = tracing::debug_span!(target: "runtime", "NearVM::compile_and_load").entered();
         let key = get_contract_cache_key(code, &self.config);
+        if let Some(Ok(Some(entry))) = cache.map(|cache| cache.hack_get(&key)) {
+            return Ok(Ok(entry));
+        }
         let cache_record = cache
             .map(|cache| cache.get(&key))
             .transpose()
             .map_err(CacheError::ReadError)?
             .flatten();
 
+        let start = Instant::now();
         let stored_artifact: Option<VMArtifact> = match cache_record {
             None => None,
             Some(CompiledContract::CompileModuleError(err)) => return Ok(Err(err)),
             Some(CompiledContract::Code(serialized_module)) => {
-                let _span = tracing::debug_span!(target: "vm", "NearVM::read_from_cache").entered();
+                let _span =
+                    tracing::debug_span!(target: "runtime", "NearVM::read_from_cache").entered();
                 unsafe {
                     // (UN-)SAFETY: the `serialized_module` must have been produced by a prior call to
                     // `serialize`.
@@ -385,18 +409,29 @@ impl NearVM {
                 }
             }
         };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMLOGIC_LOAD_ARTIFACT_TIME.inc_by(elapsed);
 
         Ok(if let Some(it) = stored_artifact {
+            if let Some(cache) = cache {
+                cache.hack_put(&key, it.clone()).unwrap();
+            }
             Ok(it)
         } else {
-            match self.compile_and_cache(code, cache)? {
+            let result = match self.compile_and_cache(code, cache)? {
                 Ok(executable) => Ok(self
                     .engine
                     .load_universal_executable(&executable)
                     .map(Arc::new)
                     .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
                 Err(err) => Err(err),
+            };
+            if let Ok(v) = &result {
+                if let Some(cache) = cache {
+                    cache.hack_put(&key, v.clone()).unwrap();
+                }
             }
+            result
         })
     }
 
@@ -655,6 +690,28 @@ impl<'a> finite_wasm::wasmparser::VisitOperator<'a> for GasCostCfg {
     finite_wasm::wasmparser::for_each_operator!(gas_cost);
 }
 
+use once_cell::sync::Lazy;
+
+pub static VMRUNNER_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_runner_time", "Total time used for contract execution").unwrap()
+});
+pub static VMRUNNER_LOAD_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_runner_load_time", "Total time used for contract execution")
+        .unwrap()
+});
+pub static VMRUNNER_BUILD_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter("near_vm_runner_build_time", "Total time used for contract execution")
+        .unwrap()
+});
+
+pub static VMRUNNER_WITH_INIT_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_vm_runner_with_init_time",
+        "Total time used for contract execution",
+    )
+    .unwrap()
+});
+
 impl crate::runner::VM for NearVM {
     fn run(
         &self,
@@ -666,6 +723,7 @@ impl crate::runner::VM for NearVM {
         promise_results: &[PromiseResult],
         cache: Option<&dyn CompiledContractCache>,
     ) -> Result<VMOutcome, VMRunnerError> {
+        let init_start = Instant::now();
         let mut memory = NearVmMemory::new(
             self.config.limit_config.initial_memory_pages,
             self.config.limit_config.max_memory_pages,
@@ -683,6 +741,7 @@ impl crate::runner::VM for NearVM {
             return Ok(VMOutcome::abort(logic, e));
         }
 
+        let start2 = Instant::now();
         let artifact = self.compile_and_load(code, cache)?;
         let artifact = match artifact {
             Ok(it) => it,
@@ -690,7 +749,10 @@ impl crate::runner::VM for NearVM {
                 return Ok(VMOutcome::abort(logic, FunctionCallError::CompilationError(err)));
             }
         };
+        let elapsed = start2.elapsed().as_nanos() as u64;
+        VMRUNNER_LOAD_TIME.inc_by(elapsed);
 
+        let start3 = Instant::now();
         let result = logic.after_loading_executable(code.code().len());
         if let Err(e) = result {
             return Ok(VMOutcome::abort(logic, e));
@@ -699,10 +761,20 @@ impl crate::runner::VM for NearVM {
         if let Err(e) = get_entrypoint_index(&*artifact, method_name) {
             return Ok(VMOutcome::abort_but_nop_outcome_in_old_protocol(logic, e));
         }
-        match self.run_method(&artifact, import, method_name)? {
+        let elapsed = start3.elapsed().as_nanos() as u64;
+        VMRUNNER_BUILD_TIME.inc_by(elapsed);
+
+        let start = Instant::now();
+
+        let res = match self.run_method(&artifact, import, method_name)? {
             Ok(()) => Ok(VMOutcome::ok(logic)),
             Err(err) => Ok(VMOutcome::abort(logic, err)),
-        }
+        };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VMRUNNER_TIME.inc_by(elapsed);
+        let elapsed = init_start.elapsed().as_nanos() as u64;
+        VMRUNNER_WITH_INIT_TIME.inc_by(elapsed);
+        res
     }
 
     fn precompile(

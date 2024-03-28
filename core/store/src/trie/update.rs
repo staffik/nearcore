@@ -2,12 +2,17 @@ pub use self::iterator::TrieUpdateIterator;
 use super::{OptimizedValueRef, Trie};
 use crate::trie::{KeyLookupMode, TrieChanges};
 use crate::StorageError;
+use near_o11y::metrics::{try_create_int_counter, try_create_int_gauge, IntCounter, IntGauge};
+use near_primitives::hash::CryptoHash;
 use near_primitives::trie_key::TrieKey;
 use near_primitives::types::{
     RawStateChange, RawStateChanges, RawStateChangesWithTrieKey, StateChangeCause, StateRoot,
     TrieCacheMode,
 };
-use std::collections::BTreeMap;
+use once_cell::sync::Lazy;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 mod iterator;
 
@@ -26,6 +31,7 @@ pub struct TrieUpdate {
     pub trie: Trie,
     committed: RawStateChanges,
     prospective: TrieUpdates,
+    contract_codes: RefCell<HashMap<CryptoHash, Arc<[u8]>>>,
 }
 
 pub enum TrieUpdateValuePtr<'a> {
@@ -49,9 +55,26 @@ impl<'a> TrieUpdateValuePtr<'a> {
     }
 }
 
+pub static CCCACHE2_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| try_create_int_gauge("near_cccache2_size", "near_cccache_size").unwrap());
+
+pub static CCCACHE2_GETS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_gets", "near_cccache_gets").unwrap());
+
+pub static CCCACHE2_PUTS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_puts", "near_cccache_puts").unwrap());
+
+pub static CCCACHE2_HITS: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_cccache2_hits", "near_cccache_hits").unwrap());
+
 impl TrieUpdate {
     pub fn new(trie: Trie) -> Self {
-        TrieUpdate { trie, committed: Default::default(), prospective: Default::default() }
+        TrieUpdate {
+            trie,
+            committed: Default::default(),
+            prospective: Default::default(),
+            contract_codes: RefCell::new(Default::default()),
+        }
     }
 
     pub fn trie(&self) -> &Trie {
@@ -101,6 +124,7 @@ impl TrieUpdate {
                 return Ok(data.as_ref().map(<Vec<u8>>::clone));
             }
         }
+
         self.trie.get(&key)
     }
 
@@ -174,6 +198,32 @@ impl TrieUpdate {
 impl crate::TrieAccess for TrieUpdate {
     fn get(&self, key: &TrieKey) -> Result<Option<Vec<u8>>, StorageError> {
         TrieUpdate::get(self, key)
+    }
+
+    fn get_code(
+        &self,
+        key: &TrieKey,
+        code_hash: Option<CryptoHash>,
+    ) -> Result<Option<Arc<[u8]>>, StorageError> {
+        match code_hash {
+            None => self.get(key).map(|v| v.map(|v| v.into())),
+            Some(code_hash) => {
+                CCCACHE2_GETS.inc();
+                if let Some(code) = self.contract_codes.borrow().get(&code_hash) {
+                    CCCACHE2_HITS.inc();
+                    return Ok(Some(code.clone()));
+                }
+
+                let result = self.get(key);
+                if let Ok(Some(code)) = result {
+                    CCCACHE2_PUTS.inc();
+                    self.contract_codes.borrow_mut().insert(code_hash, code.into());
+                }
+                CCCACHE2_SIZE.set(self.contract_codes.borrow().len() as i64);
+
+                Ok(self.contract_codes.borrow().get(&code_hash).cloned())
+            }
+        }
     }
 
     fn contains_key(&self, key: &TrieKey) -> Result<bool, StorageError> {

@@ -3,6 +3,7 @@ use near_o11y::metrics::{
     IntCounter, IntCounterVec,
 };
 use once_cell::sync::Lazy;
+use std::time::Instant;
 
 pub static ACTION_CALLED_COUNT: Lazy<IntCounterVec> = Lazy::new(|| {
     try_create_int_counter_vec(
@@ -196,6 +197,14 @@ static CHUNK_TX_TGAS: Lazy<HistogramVec> = Lazy::new(|| {
     )
     .unwrap()
 });
+static TX_TIME: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_tx_time", "near_tx_time").unwrap());
+static LOCAL_TIME: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_local_time", "near_local_time").unwrap());
+static DELAYED_TIME: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_delayed_time", "near_delayed_time").unwrap());
+static INCOMING_TIME: Lazy<IntCounter> =
+    Lazy::new(|| try_create_int_counter("near_incoming_time", "near_incoming_time").unwrap());
 
 /// Buckets used for burned gas in receipts.
 ///
@@ -250,22 +259,46 @@ impl ApplyMetrics {
         delta
     }
 
-    pub fn tx_processing_done(&mut self, accumulated_gas: u64, accumulated_compute: u64) {
+    pub fn tx_processing_done(
+        &mut self,
+        accumulated_gas: u64,
+        accumulated_compute: u64,
+        time: Instant,
+    ) {
+        TX_TIME.inc_by(time.elapsed().as_nanos() as u64);
         (self.tx_gas, self.tx_compute_usage) =
             self.update_accumulated(accumulated_gas, accumulated_compute);
     }
 
-    pub fn local_receipts_done(&mut self, accumulated_gas: u64, accumulated_compute: u64) {
+    pub fn local_receipts_done(
+        &mut self,
+        accumulated_gas: u64,
+        accumulated_compute: u64,
+        time: Instant,
+    ) {
+        LOCAL_TIME.inc_by(time.elapsed().as_nanos() as u64);
         (self.local_receipts_gas, self.local_receipts_compute_usage) =
             self.update_accumulated(accumulated_gas, accumulated_compute);
     }
 
-    pub fn delayed_receipts_done(&mut self, accumulated_gas: u64, accumulated_compute: u64) {
+    pub fn delayed_receipts_done(
+        &mut self,
+        accumulated_gas: u64,
+        accumulated_compute: u64,
+        time: Instant,
+    ) {
+        DELAYED_TIME.inc_by(time.elapsed().as_nanos() as u64);
         (self.delayed_receipts_gas, self.delayed_receipts_compute_usage) =
             self.update_accumulated(accumulated_gas, accumulated_compute);
     }
 
-    pub fn incoming_receipts_done(&mut self, accumulated_gas: u64, accumulated_compute: u64) {
+    pub fn incoming_receipts_done(
+        &mut self,
+        accumulated_gas: u64,
+        accumulated_compute: u64,
+        time: Instant,
+    ) {
+        INCOMING_TIME.inc_by(time.elapsed().as_nanos() as u64);
         (self.incoming_receipts_gas, self.incoming_receipts_compute_usage) =
             self.update_accumulated(accumulated_gas, accumulated_compute);
     }

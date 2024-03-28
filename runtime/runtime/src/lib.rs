@@ -53,6 +53,7 @@ use near_vm_runner::ProfileDataV3;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::debug;
 
 mod actions;
@@ -170,6 +171,33 @@ pub struct ActionResult {
     pub profile: Box<ProfileDataV3>,
 }
 
+use once_cell::sync::Lazy;
+use near_o11y::metrics::{try_create_int_counter, IntCounter};
+
+pub static RUNTIME_APPLY_TIME: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_runtime_apply_time",
+        "Total time used for runtime::apply()",
+    )
+    .unwrap()
+});
+
+pub static ACTION_FN: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_action_fn",
+        "Total function call time",
+    )
+    .unwrap()
+});
+
+pub static PROCESS_RCPT: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_process_rcpt",
+        "Total process receipt time",
+    )
+    .unwrap()
+});
+
 impl ActionResult {
     pub fn merge(&mut self, mut next_result: ActionResult) -> Result<(), RuntimeError> {
         assert!(next_result.gas_burnt_for_function_call <= next_result.gas_burnt);
@@ -222,6 +250,55 @@ impl Default for ActionResult {
 
 pub struct Runtime {}
 
+
+pub static PART_ONE: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_one",
+        "apply part one time",
+    )
+    .unwrap()
+});
+
+pub static PART_TWO: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_two",
+        "apply part two time",
+    )
+    .unwrap()
+});
+
+pub static PART_3: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_3",
+        "apply part three time",
+    )
+    .unwrap()
+});
+
+pub static PART_4: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_4",
+        "apply part 4 time",
+    )
+    .unwrap()
+});
+
+pub static PART_5: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_part_5",
+        "apply part 5 time",
+    )
+    .unwrap()
+});
+
+pub static APPLY_ACTION: Lazy<IntCounter> = Lazy::new(|| {
+    try_create_int_counter(
+        "near_apply_act",
+        "Total apply action time",
+    )
+    .unwrap()
+});
+
 impl Runtime {
     pub fn new() -> Self {
         Self {}
@@ -257,10 +334,11 @@ impl Runtime {
         signed_transaction: &SignedTransaction,
         stats: &mut ApplyStats,
     ) -> Result<(Receipt, ExecutionOutcomeWithId), RuntimeError> {
+        
         let _span = tracing::debug_span!(target: "runtime", "process_transaction", tx_hash = %signed_transaction.get_hash()).entered();
         metrics::TRANSACTION_PROCESSED_TOTAL.inc();
 
-        match verify_and_charge_transaction(
+        let x = match verify_and_charge_transaction(
             &apply_state.config,
             state_update,
             apply_state.gas_price,
@@ -319,7 +397,9 @@ impl Runtime {
                 state_update.rollback();
                 Err(e)
             }
-        }
+        };
+        
+        x
     }
 
     fn apply_action(
@@ -391,7 +471,8 @@ impl Runtime {
                 )?;
             }
             Action::FunctionCall(function_call) => {
-                action_function_call(
+                let start=Instant::now();
+                let x = action_function_call(
                     state_update,
                     apply_state,
                     account.as_mut().expect(EXPECT_ACCOUNT_EXISTS),
@@ -405,7 +486,10 @@ impl Runtime {
                     &apply_state.config,
                     action_index + 1 == actions.len(),
                     epoch_info_provider,
-                )?;
+                );
+                let elapsed = start.elapsed().as_nanos() as u64;
+                ACTION_FN.inc_by(elapsed);
+                x?;
             }
             Action::Transfer(TransferAction { deposit }) => {
                 action_transfer_or_implicit_account_creation(
@@ -558,6 +642,7 @@ impl Runtime {
                 &apply_state.block_hash,
                 action_index,
             );
+            let start= Instant::now();
             let mut new_result = self.apply_action(
                 action,
                 state_update,
@@ -572,6 +657,8 @@ impl Runtime {
                 &action_receipt.actions,
                 epoch_info_provider,
             )?;
+            let elapsed = start.elapsed().as_nanos() as u64;
+            APPLY_ACTION.inc_by(elapsed);
             if new_result.result.is_ok() {
                 if let Err(e) = new_result.new_receipts.iter().try_for_each(|receipt| {
                     validate_receipt(
@@ -896,6 +983,7 @@ impl Runtime {
         stats: &mut ApplyStats,
         epoch_info_provider: &dyn EpochInfoProvider,
     ) -> Result<Option<ExecutionOutcomeWithId>, RuntimeError> {
+        let start=Instant::now();
         let account_id = &receipt.receiver_id;
         match receipt.receipt {
             ReceiptEnum::Data(ref data_receipt) => {
@@ -1038,6 +1126,8 @@ impl Runtime {
         // We didn't trigger execution, so we need to commit the state.
         state_update
             .commit(StateChangeCause::PostponedReceipt { receipt_hash: receipt.get_hash() });
+        let elapsed = start.elapsed().as_nanos() as u64;
+        PROCESS_RCPT.inc_by(elapsed);
         Ok(None)
     }
 
@@ -1229,11 +1319,13 @@ impl Runtime {
         epoch_info_provider: &dyn EpochInfoProvider,
         state_patch: SandboxStatePatch,
     ) -> Result<ApplyResult, RuntimeError> {
+        let start = Instant::now();
         // state_patch must be empty unless this is sandbox build.  Thanks to
         // conditional compilation this always resolves to true so technically
         // the check is not necessary.  It’s defence in depth to make sure any
         // future refactoring won’t break the condition.
         assert!(cfg!(feature = "sandbox") || state_patch.is_empty());
+        
 
         let _span = tracing::debug_span!(
             target: "runtime",
@@ -1312,6 +1404,7 @@ impl Runtime {
         let mut total_gas_burnt = gas_used_for_migrations;
         let mut total_compute_usage = total_gas_burnt;
         let mut metrics = metrics::ApplyMetrics::default();
+        let time = Instant::now();
 
         for signed_transaction in transactions {
             let (receipt, outcome_with_id) = self.process_transaction(
@@ -1344,7 +1437,7 @@ impl Runtime {
 
             outcomes.push(outcome_with_id);
         }
-        metrics.tx_processing_done(total_gas_burnt, total_compute_usage);
+        metrics.tx_processing_done(total_gas_burnt, total_compute_usage, time);
 
         let mut process_receipt = |receipt: &Receipt,
                                    state_update: &mut TrieUpdate,
@@ -1398,6 +1491,7 @@ impl Runtime {
         // TODO(#8859): Introduce a dedicated `compute_limit` for the chunk.
         // For now compute limit always matches the gas limit.
         let compute_limit = apply_state.gas_limit.unwrap_or(Gas::max_value());
+        let time = Instant::now();
 
         // We first process local receipts. They contain staking, local contract calls, etc.
         if let Some(prefetcher) = &mut prefetcher {
@@ -1419,8 +1513,13 @@ impl Runtime {
                 set_delayed_receipt(&mut state_update, &mut delayed_receipts_indices, receipt);
             }
         }
-        metrics.local_receipts_done(total_gas_burnt, total_compute_usage);
+        metrics.local_receipts_done(total_gas_burnt, total_compute_usage, time);
 
+        let elapsed = start.elapsed().as_nanos() as u64;
+        PART_ONE.inc_by(elapsed);
+        let start2 = Instant::now();
+
+        let time = Instant::now();
         // Then we process the delayed receipts. It's a backlog of receipts from the past blocks.
         while delayed_receipts_indices.first_index < delayed_receipts_indices.next_available_index {
             if total_compute_usage >= compute_limit {
@@ -1464,9 +1563,12 @@ impl Runtime {
             )?;
             processed_delayed_receipts.push(receipt);
         }
-        metrics.delayed_receipts_done(total_gas_burnt, total_compute_usage);
+        metrics.delayed_receipts_done(total_gas_burnt, total_compute_usage, time);
+        let elapsed = start2.elapsed().as_nanos() as u64;
+        PART_TWO.inc_by(elapsed);
 
         // And then we process the new incoming receipts. These are receipts from other shards.
+        let time = Instant::now();
         if let Some(prefetcher) = &mut prefetcher {
             prefetcher.clear();
             // Prefetcher is allowed to fail
@@ -1492,8 +1594,10 @@ impl Runtime {
                 set_delayed_receipt(&mut state_update, &mut delayed_receipts_indices, receipt);
             }
         }
-        metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage);
-
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_3.inc_by(elapsed);
+        metrics.incoming_receipts_done(total_gas_burnt, total_compute_usage, time);
+        let time = Instant::now();
         // No more receipts are executed on this trie, stop any pending prefetches on it.
         if let Some(prefetcher) = &prefetcher {
             prefetcher.clear();
@@ -1512,10 +1616,16 @@ impl Runtime {
             &outgoing_receipts,
             &stats,
         )?;
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_4.inc_by(elapsed);
+        let time = Instant::now();
 
         state_update.commit(StateChangeCause::UpdatedDelayedReceipts);
         self.apply_state_patch(&mut state_update, state_patch);
         let (trie, trie_changes, state_changes) = state_update.finalize()?;
+
+        let elapsed = time.elapsed().as_nanos() as u64;
+        PART_5.inc_by(elapsed);
 
         // Dedup proposals from the same account.
         // The order is deterministically changed.
@@ -1531,7 +1641,7 @@ impl Runtime {
 
         let state_root = trie_changes.new_root;
         let proof = trie.recorded_storage();
-        Ok(ApplyResult {
+        let x = Ok(ApplyResult {
             state_root,
             trie_changes,
             validator_proposals: unique_proposals,
@@ -1543,7 +1653,10 @@ impl Runtime {
             proof,
             delayed_receipts_count: delayed_receipts_indices.len(),
             metrics: Some(metrics),
-        })
+        });
+        let elapsed = start.elapsed().as_nanos() as u64;
+        RUNTIME_APPLY_TIME.inc_by(elapsed);
+        x
     }
 
     fn apply_state_patch(&self, state_update: &mut TrieUpdate, state_patch: SandboxStatePatch) {
