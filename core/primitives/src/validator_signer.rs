@@ -14,6 +14,7 @@ use crate::stateless_validation::{
 use crate::telemetry::TelemetryInfo;
 use crate::types::{AccountId, BlockHeight, EpochId};
 
+
 /// Validator signer that is used to sign blocks and approvals.
 pub trait ValidatorSigner: Sync + Send {
     /// Account id of the given validator.
