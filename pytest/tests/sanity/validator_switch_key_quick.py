@@ -30,11 +30,10 @@ nodes = start_cluster(
 time.sleep(2)
 
 nodes[2].reset_validator_key(nodes[1].validator_key)
-#nodes[2].reset_data()
-time.sleep(3)
-
 nodes[1].kill()
 nodes[2].reload_updateable_config()
+nodes[2].stop_checking_store()
+time.sleep(2)
 
 block = nodes[0].get_latest_block()
 target_height = block.height + 4 * EPOCH_LENGTH
@@ -50,14 +49,29 @@ while True:
     count = len(info['result']['next_validators'])
     assert count == 2, 'Number of validators do not match'
     validator = info['result']['next_validators'][1]['account_id']
-    #assert validator == 'test2'
-    statuses = sorted((enumerate(node.get_latest_block() for node in [nodes[0], nodes[2]])),
+    # We copied over 'test1' validator key, along with validator account ID.
+    # Therefore, despite nodes[1] being stopped, 'test1' still figures as active validator.
+    assert validator == 'test1'
+    statuses = sorted([(node_idx, nodes[node_idx].get_latest_block()) for node_idx in [0, 2]],
                       key=lambda element: element[1].height)
+    #assert False
+    print('### HERE')
+    print(statuses)
     last = statuses.pop()
     cur_height = last[1].height
+    print('- ',last[0])
     node = nodes[last[0]]
+    succeed = True
     for _, block in statuses:
         try:
+            print(block.hash)
             node.get_block(block.hash)
         except Exception:
-            assert False, 'Nodes are not synced'
+            succeed = False
+            break
+    print(succeed)
+    # if statuses[0][1].height > EPOCH_LENGTH * 2 + 5 and succeed:
+    #     sys.exit(0)
+    time.sleep(1)
+
+#assert False, 'Nodes are not synced

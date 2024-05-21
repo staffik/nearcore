@@ -35,7 +35,7 @@ impl Client {
             return Ok(());
         }
 
-        let my_signer = self.validator_signer.as_ref().ok_or(Error::NotAValidator)?.clone();
+        let my_signer = self.validator_signer.get().ok_or(Error::NotAValidator)?.clone();
         let state_witness = self.create_state_witness(
             my_signer.validator_id().clone(),
             prev_block_header,

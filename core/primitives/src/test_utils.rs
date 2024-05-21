@@ -40,7 +40,7 @@ impl Transaction {
         Self { signer_id, public_key, nonce, receiver_id, block_hash, actions: vec![] }
     }
 
-    pub fn sign(self, signer: &dyn Signer) -> SignedTransaction {
+    pub fn sign(self, signer: &Signer) -> SignedTransaction {
         let signature = signer.sign(self.get_hash_and_size().0.as_ref());
         SignedTransaction::new(signature, self)
     }
@@ -101,7 +101,7 @@ impl SignedTransaction {
         nonce: Nonce,
         signer_id: AccountId,
         receiver_id: AccountId,
-        signer: &dyn Signer,
+        signer: &Signer,
         actions: Vec<Action>,
         block_hash: CryptoHash,
     ) -> Self {
@@ -120,7 +120,7 @@ impl SignedTransaction {
         nonce: Nonce,
         signer_id: AccountId,
         receiver_id: AccountId,
-        signer: &dyn Signer,
+        signer: &Signer,
         deposit: Balance,
         block_hash: CryptoHash,
     ) -> Self {
@@ -137,7 +137,7 @@ impl SignedTransaction {
     pub fn stake(
         nonce: Nonce,
         signer_id: AccountId,
-        signer: &dyn Signer,
+        signer: &Signer,
         stake: Balance,
         public_key: PublicKey,
         block_hash: CryptoHash,
@@ -158,7 +158,7 @@ impl SignedTransaction {
         new_account_id: AccountId,
         amount: Balance,
         public_key: PublicKey,
-        signer: &dyn Signer,
+        signer: &Signer,
         block_hash: CryptoHash,
     ) -> Self {
         Self::from_actions(
@@ -185,7 +185,7 @@ impl SignedTransaction {
         code: Vec<u8>,
         amount: Balance,
         public_key: PublicKey,
-        signer: &dyn Signer,
+        signer: &Signer,
         block_hash: CryptoHash,
     ) -> Self {
         Self::from_actions(
@@ -210,7 +210,7 @@ impl SignedTransaction {
         nonce: Nonce,
         signer_id: AccountId,
         receiver_id: AccountId,
-        signer: &dyn Signer,
+        signer: &Signer,
         deposit: Balance,
         method_name: String,
         args: Vec<u8>,
@@ -237,7 +237,7 @@ impl SignedTransaction {
         signer_id: AccountId,
         receiver_id: AccountId,
         beneficiary_id: AccountId,
-        signer: &dyn Signer,
+        signer: &Signer,
         block_hash: CryptoHash,
     ) -> Self {
         Self::from_actions(
@@ -255,7 +255,7 @@ impl SignedTransaction {
             0,
             "test".parse().unwrap(),
             "test".parse().unwrap(),
-            &EmptySigner {},
+            &Signer::EmptySigner(EmptySigner::new()),
             vec![],
             block_hash,
         )
@@ -295,7 +295,7 @@ impl BlockHeader {
         }
     }
 
-    pub fn resign(&mut self, signer: &dyn ValidatorSigner) {
+    pub fn resign(&mut self, signer: &ValidatorSigner) {
         let (hash, signature) = signer.sign_block_header_parts(
             *self.prev_hash(),
             &self.inner_lite_bytes(),
@@ -378,12 +378,12 @@ impl BlockBody {
 /// # Examples
 ///
 /// // TODO(mm-near): change it to doc-tested code once we have easy way to create a genesis block.
-/// let signer = EmptyValidatorSigner::default();
+/// let signer = ValidatorSigner::EmptyValidatorSigner(EmptyValidatorSigner::default());
 /// let test_block = test_utils::TestBlockBuilder::new(prev, signer).height(33).build();
 pub struct TestBlockBuilder {
     clock: Clock,
     prev: Block,
-    signer: Arc<dyn ValidatorSigner>,
+    signer: Arc<ValidatorSigner>,
     height: u64,
     epoch_id: EpochId,
     next_epoch_id: EpochId,
@@ -393,7 +393,7 @@ pub struct TestBlockBuilder {
 }
 
 impl TestBlockBuilder {
-    pub fn new(clock: Clock, prev: &Block, signer: Arc<dyn ValidatorSigner>) -> Self {
+    pub fn new(clock: Clock, prev: &Block, signer: Arc<ValidatorSigner>) -> Self {
         let mut tree = PartialMerkleTree::default();
         tree.insert(*prev.hash());
 
@@ -642,11 +642,13 @@ pub fn encode(xs: &[u64]) -> Vec<u8> {
 
 // Helper function that creates a new signer for a given account, that uses the account name as seed.
 // Should be used only in tests.
-pub fn create_test_signer(account_name: &str) -> InMemoryValidatorSigner {
-    InMemoryValidatorSigner::from_seed(
-        account_name.parse().unwrap(),
-        KeyType::ED25519,
-        account_name,
+pub fn create_test_signer(account_name: &str) -> ValidatorSigner {
+    ValidatorSigner::InMemoryValidatorSigner(
+        InMemoryValidatorSigner::from_seed(
+            account_name.parse().unwrap(),
+            KeyType::ED25519,
+            account_name,
+        )
     )
 }
 

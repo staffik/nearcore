@@ -2,8 +2,8 @@
 
 use near_async::time::Clock;
 use near_chain_configs::UpdateableClientConfig;
+use near_crypto::InMemorySigner;
 use near_o11y::log_config::LogConfig;
-use near_primitives::validator_signer::InMemoryValidatorSigner;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ pub struct UpdateableConfigs {
     /// Contents of the `config.json` corresponding to the mutable fields of `ClientConfig`.
     pub client_config: Option<UpdateableClientConfig>,
     /// Validator key hot loaded from file.
-    pub validator_signer: Option<Arc<InMemoryValidatorSigner>>,
+    pub validator_signer: Option<InMemorySigner>,
 }
 
 /// Pushes the updates to listeners.
