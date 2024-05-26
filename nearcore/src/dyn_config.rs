@@ -1,5 +1,6 @@
 use crate::config::Config;
 use near_chain_configs::UpdateableClientConfig;
+use near_crypto::InMemorySigner;
 use near_dyn_configs::{UpdateableConfigLoaderError, UpdateableConfigs};
 use near_o11y::log_config::LogConfig;
 use serde::Deserialize;
@@ -19,22 +20,31 @@ pub fn read_updateable_configs(
             None
         }
     };
-    let updateable_client_config =
-        match Config::from_file(&home_dir.join(crate::config::CONFIG_FILENAME))
-            .map(get_updateable_client_config)
-        {
-            Ok(config) => Some(config),
-            Err(err) => {
-                errs.push(UpdateableConfigLoaderError::ConfigFileError {
-                    file: PathBuf::from(crate::config::CONFIG_FILENAME),
-                    err: err.into(),
-                });
-                None
-            }
-        };
+    let config = match Config::from_file(&home_dir.join(crate::config::CONFIG_FILENAME))
+    {
+        Ok(config) => Some(config),
+        Err(err) => {
+            errs.push(UpdateableConfigLoaderError::ConfigFileError {
+                file: PathBuf::from(crate::config::CONFIG_FILENAME),
+                err: err.into(),
+            });
+            None
+        }
+    };
+    let updateable_client_config = config.as_ref().map(get_updateable_client_config);
+
+    let validator_signer = if let Some(config) = config {
+        read_validator_key(home_dir, &config).unwrap_or_else(|err| {
+            errs.push(err);
+            None
+        })
+    } else {
+        None
+    };
+
     if errs.is_empty() {
         crate::metrics::CONFIG_CORRECT.set(1);
-        Ok(UpdateableConfigs { log_config, client_config: updateable_client_config })
+        Ok(UpdateableConfigs { log_config, client_config: updateable_client_config, validator_signer })
     } else {
         tracing::warn!(target: "neard", "Dynamically updateable configs are not valid. Please fix this ASAP otherwise the node will be unable to restart: {:?}", &errs);
         crate::metrics::CONFIG_CORRECT.set(0);
@@ -42,7 +52,7 @@ pub fn read_updateable_configs(
     }
 }
 
-pub fn get_updateable_client_config(config: Config) -> UpdateableClientConfig {
+pub fn get_updateable_client_config(config: &Config) -> UpdateableClientConfig {
     // All fields that can be updated while the node is running should be explicitly set here.
     // Keep this list in-sync with `core/dyn-configs/README.md`.
     UpdateableClientConfig {
@@ -85,5 +95,26 @@ where
             }
             _ => Err(UpdateableConfigLoaderError::OpenAndRead { file: path.to_path_buf(), err }),
         },
+    }
+}
+
+fn read_validator_key(
+    home_dir: &Path,
+    config: &Config,
+) -> Result<Option<InMemorySigner>, UpdateableConfigLoaderError> {
+    let validator_file: PathBuf = home_dir.join(&config.validator_key_file);
+    if validator_file.exists() {
+        match InMemorySigner::from_file(&validator_file) {
+            Ok(validator_signer) => {
+                tracing::info!(target: "neard", "Hot loading validator key {}.", validator_file.display());
+                Ok(Some(validator_signer))
+            },
+            Err(err) => {
+                Err(UpdateableConfigLoaderError::ValidatorKeyFileError { file: validator_file, err: err.into() })
+            }
+        }
+    } else {
+        tracing::info!(target: "neard", "No validator key {}.", validator_file.display());
+        Ok(None)
     }
 }
